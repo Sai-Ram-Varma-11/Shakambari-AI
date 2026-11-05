@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..food_policy import food_is_allowed, is_eligible_menu_item
 from ..models import DishPreference, Institution, MenuItem, MenuRecommendation, Rating
 from ..security import Ctx, need
 from ..services import analytics as A
@@ -85,5 +86,14 @@ def generate(days: int = 90, ctx: Ctx = Depends(need("mess_admin")), db: Session
 
 @router.get("/saved")
 def saved(ctx: Ctx = Depends(need("mess_admin")), db: Session = Depends(get_db)):
-    return [{"id": r.id, "kind": r.kind, "message": r.message, "evidence": r.evidence, "created_at": r.created_at}
-            for r in db.query(MenuRecommendation).filter_by(institution_id=ctx.inst_id).order_by(MenuRecommendation.id.desc())]
+    rows = db.query(MenuRecommendation).filter_by(institution_id=ctx.inst_id).order_by(MenuRecommendation.id.desc())
+    out = []
+    for recommendation in rows:
+        item = db.get(MenuItem, recommendation.menu_item_id) if recommendation.menu_item_id else None
+        if recommendation.menu_item_id and not is_eligible_menu_item(item):
+            continue
+        if not recommendation.menu_item_id and not food_is_allowed(recommendation.message or ""):
+            continue
+        out.append({"id": recommendation.id, "kind": recommendation.kind, "message": recommendation.message,
+                    "evidence": recommendation.evidence, "created_at": recommendation.created_at})
+    return out

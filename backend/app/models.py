@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
-from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text,
-                        UniqueConstraint)
+from sqlalchemy import (JSON, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String,
+                        Text, UniqueConstraint)
 
 from .db import Base
 from .util import local_now as now
@@ -42,7 +42,7 @@ class User(Base):
 class StudentProfile(Base):
     __tablename__ = "student_profiles"
     user_id = fk("users.id", primary_key=True)
-    diet = Column(String(20), default="veg")  # veg | egg | non_veg | vegan
+    diet = Column(String(20), default="veg")  # veg | vegan
     hostel = Column(String(80))
     dietary_notes = Column(String(300))
 
@@ -60,15 +60,22 @@ class NGOPartner(Base):
 
 class MenuItem(Base):
     __tablename__ = "menu_items"
-    __table_args__ = (UniqueConstraint("institution_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("institution_id", "name"),
+        CheckConstraint(
+            "NOT is_active OR (diet IS NOT NULL AND diet IN ('veg', 'vegan'))",
+            name="ck_menu_items_active_vegetarian",
+        ),
+    )
     id = Column(Integer, primary_key=True)
     institution_id = fk("institutions.id", nullable=False, index=True)
     name = Column(String(120), nullable=False)
     category = Column(String(30), default="other")
     diet = Column(String(20), default="veg")
+    ingredients = Column(JSON, nullable=True, default=list)
     portion_kg = Column(Float, nullable=False, default=0.15)  # cooked weight per student portion
     cost_per_kg = Column(Float, nullable=False, default=100.0)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, nullable=False)
 
 
 class MealSchedule(Base):
@@ -187,11 +194,19 @@ class WasteRecord(Base):
 
 class SurplusListing(Base):
     __tablename__ = "surplus_listings"
+    __table_args__ = (
+        CheckConstraint(
+            "status <> 'eligible' OR (diet IS NOT NULL AND diet IN ('veg', 'vegan'))",
+            name="ck_surplus_eligible_vegetarian",
+        ),
+    )
     id = Column(Integer, primary_key=True)
     institution_id = fk("institutions.id", nullable=False, index=True)
     schedule_id = fk("meal_schedules.id", nullable=True, ondelete="SET NULL")
     menu_item_id = fk("menu_items.id", nullable=True, ondelete="SET NULL")
     food_name = Column(String(150), nullable=False)
+    diet = Column(String(20))
+    ingredients = Column(JSON)
     category = Column(String(30), nullable=False)  # cooked|packaged|fruit|bakery|raw|other
     quantity_kg = Column(Float, nullable=False)
     portions = Column(Integer, default=0)

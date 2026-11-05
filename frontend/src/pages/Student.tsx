@@ -16,7 +16,7 @@ function MealCard({ s, prefs, onPref, reload }: any) {
       {s.event && <div className="mt-1 text-xs font-medium text-brand-700">{s.event}</div>}
       <ul className="mt-3 flex flex-wrap gap-1.5">{s.dishes.map((d: any) => (
         <li key={d.id} className="flex items-center gap-1 rounded-full bg-slate-100 py-0.5 pl-2.5 pr-1 text-xs">
-          <span>{d.name}</span><span className="text-[10px] text-slate-400">{d.diet === 'veg' ? 'V' : d.diet === 'egg' ? 'E' : d.diet === 'non_veg' ? 'NV' : 'VG'}</span>
+          <span>{d.name}</span><span className="text-[10px] text-slate-400">{d.diet === 'vegan' ? 'VG' : 'V'}</span>
           {onPref && <><button aria-label={`Like ${d.name}`} onClick={() => onPref(d.id, prefs[d.id] === 'like' ? null : 'like')} className={`rounded-full p-1 ${prefs[d.id] === 'like' ? 'bg-emerald-200 text-emerald-800' : 'text-slate-400 hover:text-emerald-700'}`}><ThumbsUp className="h-3 w-3" /></button>
             <button aria-label={`Dislike ${d.name}`} onClick={() => onPref(d.id, prefs[d.id] === 'dislike' ? null : 'dislike')} className={`rounded-full p-1 ${prefs[d.id] === 'dislike' ? 'bg-rose-200 text-rose-800' : 'text-slate-400 hover:text-rose-700'}`}><ThumbsDown className="h-3 w-3" /></button></>}
         </li>))}{!s.dishes.length && <li className="text-xs text-slate-400">Menu not published yet</li>}</ul>

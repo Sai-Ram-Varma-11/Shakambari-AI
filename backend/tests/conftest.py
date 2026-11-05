@@ -1,7 +1,6 @@
-import os, pathlib, shutil
+import os, pathlib, shutil, tempfile
 
-TMP = pathlib.Path(__file__).parent / "_tmp"
-shutil.rmtree(TMP, ignore_errors=True); TMP.mkdir()
+TMP = pathlib.Path(tempfile.mkdtemp(prefix="platesense-tests-"))
 os.environ.update(DATABASE_URL=f"sqlite:///{TMP / 'test.db'}", UPLOAD_DIR=str(TMP / "uploads"), MODEL_DIR=str(TMP / "models"),
                   DEBUG_RETURN_RESET_TOKEN="true", SECRET_KEY="test-secret-key-for-tests-only-0123456789")
 
@@ -24,3 +23,7 @@ def db():
     s = SessionLocal()
     yield s
     s.close()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    shutil.rmtree(TMP, ignore_errors=True)

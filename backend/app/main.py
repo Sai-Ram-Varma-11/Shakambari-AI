@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .db import Base, SessionLocal, engine
+from .food_migrations import apply_food_policy_migrations
 from . import models  # noqa: F401
 from .routers import admin, alerts, auth, bookings, kitchen, menu, menu_opt, predict, surplus, sustainability, users, vision, waste
 
@@ -32,6 +33,7 @@ async def _tick():
 @asynccontextmanager
 async def lifespan(app):
     Base.metadata.create_all(engine)
+    apply_food_policy_migrations(engine)
     task = asyncio.create_task(_tick()) if settings.scheduler_enabled else None
     yield
     if task:

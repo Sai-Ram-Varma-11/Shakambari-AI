@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
+from ..food_policy import is_eligible_menu_item
 from ..models import ImageObservation, MealSchedule, MenuItem, PreparationRecord, WasteRecord
 from ..security import Ctx, need
 from ..services import vision as V
@@ -42,6 +43,8 @@ async def upload(file: UploadFile = File(...), schedule_id: Optional[int] = Form
         m = db.get(MenuItem, menu_item_id)
         if not m or m.institution_id != ctx.inst_id:
             raise HTTPException(404, "Dish not found")
+        if not is_eligible_menu_item(m):
+            raise HTTPException(422, "Image observations can only be linked to active vegetarian dishes")
     label, conf, scores = V.classify(img)
     o = ImageObservation(institution_id=ctx.inst_id, schedule_id=schedule_id, menu_item_id=menu_item_id, file_name=V.save(data, fmt), width=img.width,
                          height=img.height, fmt=fmt, size_bytes=len(data), predicted_label=label, confidence=conf, scores=scores, created_by=ctx.user.id)
@@ -99,6 +102,8 @@ def confirm(oid: int, b: ConfirmIn, ctx: Ctx = Depends(need("mess_admin", "kitch
         raise HTTPException(409, "Already confirmed")
     if b.edible_kg > b.quantity_kg:
         raise HTTPException(422, "Edible quantity cannot exceed the quantity")
+    if o.menu_item_id and not is_eligible_menu_item(db.get(MenuItem, o.menu_item_id)):
+        raise HTTPException(409, "Legacy non-vegetarian observations are preserved and cannot enter current waste records")
     o.quantity_kg, o.status = b.quantity_kg, "confirmed"
     if o.schedule_id and o.menu_item_id:
         db.add(WasteRecord(schedule_id=o.schedule_id, menu_item_id=o.menu_item_id, leftover_qty=b.quantity_kg, edible_qty=b.edible_kg,

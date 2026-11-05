@@ -16,12 +16,14 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..food_policy import is_eligible_menu_item
 from ..models import (MEALS, Booking, Institution, MealSchedule, MenuItem, MLModel, Prediction, PreparationRecord,
                       ScheduleDish)
 from ..util import local_now, merged_settings
 from .analytics import outcome_frame
 
 MIN_ROWS = 40
+FOOD_POLICY_VERSION = 1
 FEATURES = ["dow", "is_weekend", "is_holiday", "has_event", "active", "cancellations", "cancel_rate", "lag1", "roll7",
             "same_dow", "hist_ratio", "exp_from_ratio"] + [f"meal_{m}" for m in MEALS]
 Z80 = 1.28  # 80% interval multiplier (normal approximation of residuals)
@@ -34,6 +36,15 @@ def schedule_frame(db: Session, inst_id: int) -> pd.DataFrame:
     S = MealSchedule
     rows = (db.query(S.id, S.date, S.meal_type, S.is_holiday, S.event, S.headcount, b.c.a, b.c.t)
             .outerjoin(b, b.c.sid == S.id).filter(S.institution_id == inst_id).all())
+    schedule_ids = [r[0] for r in rows]
+    dishes = db.query(ScheduleDish.schedule_id, MenuItem).join(
+        MenuItem, MenuItem.id == ScheduleDish.menu_item_id
+    ).filter(ScheduleDish.schedule_id.in_(schedule_ids)).all() if schedule_ids else []
+    dish_status = {}
+    for schedule_id, item in dishes:
+        has_dish, all_eligible = dish_status.get(schedule_id, (False, True))
+        dish_status[schedule_id] = (True, all_eligible and is_eligible_menu_item(item))
+    rows = [r for r in rows if dish_status.get(r[0], (False, False))[0] and dish_status[r[0]][1]]
     df = pd.DataFrame([tuple(r) for r in rows], columns=["id", "date", "meal_type", "is_holiday", "event", "headcount", "active", "total"])
     if df.empty:
         return df
@@ -86,7 +97,8 @@ def train(db: Session, inst_id: int) -> MLModel:
     db.query(MLModel).filter_by(institution_id=inst_id, is_active=True).update({"is_active": False})
     if len(lab) < MIN_ROWS:
         m = MLModel(institution_id=inst_id, algorithm="baseline_recent_mean", features=["roll7"], n_train=len(lab), n_test=0,
-                    metrics={"note": f"Only {len(lab)} completed meals recorded (need {MIN_ROWS}). Using a recent-average baseline; no accuracy metrics are reported."},
+                    metrics={"food_policy_version": FOOD_POLICY_VERSION,
+                             "note": f"Only {len(lab)} completed meals recorded (need {MIN_ROWS}). Using a recent-average baseline; no accuracy metrics are reported."},
                     data_mode=inst.data_mode)
         db.add(m); db.commit()
         return m
@@ -122,7 +134,7 @@ def train(db: Session, inst_id: int) -> MLModel:
     back = [{"date": d.strftime("%Y-%m-%d"), "meal_type": m, "actual": float(a), "predicted": round(float(p), 1)}
             for d, m, a, p in zip(te["date"], te["meal_type"], te["att"], p_te)][-60:]
     meta = MLModel(institution_id=inst_id, algorithm=best, features=FEATURES, n_train=len(tr), n_test=len(te), path=path, data_mode=inst.data_mode,
-                   metrics={"selected": best, "selection": "lowest time-series CV RMSE on the training period",
+                   metrics={"food_policy_version": FOOD_POLICY_VERSION, "selected": best, "selection": "lowest time-series CV RMSE on the training period",
                             "test": res[best]["test"], "candidates": res, "residual_std": round(sd, 2),
                             "split": f"chronological: train < {pd.Timestamp(cut):%Y-%m-%d} <= test", "backtest": back,
                             "note": "Test metrics come from a model fitted on the training period only; the deployed model is refit on all labelled history."})
@@ -132,12 +144,15 @@ def train(db: Session, inst_id: int) -> MLModel:
 
 def active_model(db, inst_id) -> MLModel:
     m = db.query(MLModel).filter_by(institution_id=inst_id, is_active=True).order_by(MLModel.id.desc()).first()
-    return m or train(db, inst_id)
+    if m and (m.metrics or {}).get("food_policy_version") == FOOD_POLICY_VERSION:
+        return m
+    return train(db, inst_id)
 
 
 def maybe_retrain(db: Session, inst_id: int, every: int = 14) -> bool:
-    m = db.query(MLModel).filter_by(institution_id=inst_id, is_active=True).order_by(MLModel.id.desc()).first()
-    n = db.query(MealSchedule).filter(MealSchedule.institution_id == inst_id, MealSchedule.headcount != None).count()  # noqa
+    m = active_model(db, inst_id)
+    clean = schedule_frame(db, inst_id)
+    n = int(clean["att"].notna().sum()) if not clean.empty else 0
     if m is None or n - (m.n_train + m.n_test) >= every:
         train(db, inst_id)
         return True
@@ -181,7 +196,11 @@ def predict_schedules(db: Session, inst_id: int, schedule_ids: List[int], persis
         sid = int(r["id"])
         s = db.get(MealSchedule, sid)
         dishes = []
-        for it in db.query(MenuItem).join(ScheduleDish, ScheduleDish.menu_item_id == MenuItem.id).filter(ScheduleDish.schedule_id == sid):
+        for it in db.query(MenuItem).join(ScheduleDish, ScheduleDish.menu_item_id == MenuItem.id).filter(
+            ScheduleDish.schedule_id == sid, MenuItem.is_active.is_(True), MenuItem.diet.in_(("veg", "vegan"))
+        ):
+            if not is_eligible_menu_item(it):
+                continue
             u, n = uptake.get(it.id, (0.85, 0))
             exp_cons = p * it.portion_kg * u
             rec = exp_cons * (1 + cfg["prep_buffer_pct"] / 100)
@@ -214,6 +233,10 @@ def predict_schedules(db: Session, inst_id: int, schedule_ids: List[int], persis
 
 def latest_dish_reco(db, schedule_id):
     out = {}
-    for p in db.query(Prediction).filter_by(schedule_id=schedule_id, kind="dish").order_by(Prediction.id):
-        out[p.menu_item_id] = p.value
+    rows = db.query(Prediction, MenuItem).join(MenuItem, MenuItem.id == Prediction.menu_item_id).filter(
+        Prediction.schedule_id == schedule_id, Prediction.kind == "dish"
+    ).order_by(Prediction.id)
+    for p, item in rows:
+        if is_eligible_menu_item(item):
+            out[p.menu_item_id] = p.value
     return out

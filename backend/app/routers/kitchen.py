@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, get_db
+from ..food_policy import is_eligible_menu_item
 from ..models import (ConsumptionRecord, Institution, MealSchedule, MenuItem, PreparationRecord, ScheduleDish, WasteRecord)
 from ..security import Ctx, need
 from ..services import forecast
@@ -23,7 +24,11 @@ def _sched(db, sid, ctx):
 def plan(db, s):
     reco = forecast.latest_dish_reco(db, s.id)
     out = []
-    for it in db.query(MenuItem).join(ScheduleDish, ScheduleDish.menu_item_id == MenuItem.id).filter(ScheduleDish.schedule_id == s.id):
+    for it in db.query(MenuItem).join(ScheduleDish, ScheduleDish.menu_item_id == MenuItem.id).filter(
+        ScheduleDish.schedule_id == s.id, MenuItem.is_active.is_(True), MenuItem.diet.in_(("veg", "vegan"))
+    ):
+        if not is_eligible_menu_item(it):
+            continue
         p = db.query(PreparationRecord).filter_by(schedule_id=s.id, menu_item_id=it.id).first()
         c = db.query(ConsumptionRecord).filter_by(schedule_id=s.id, menu_item_id=it.id).first()
         ws = db.query(WasteRecord).filter_by(schedule_id=s.id, menu_item_id=it.id, source="manual").all()
@@ -52,7 +57,12 @@ class PrepIn(BaseModel):
 
 
 def _check_items(db, s, ids):
-    valid = {i for (i,) in db.query(ScheduleDish.menu_item_id).filter_by(schedule_id=s.id)}
+    valid = {
+        item_id for item_id, item in db.query(ScheduleDish.menu_item_id, MenuItem)
+        .join(MenuItem, MenuItem.id == ScheduleDish.menu_item_id)
+        .filter(ScheduleDish.schedule_id == s.id)
+        if is_eligible_menu_item(item)
+    }
     if not ids or any(i not in valid for i in ids):
         raise HTTPException(422, "Items must be dishes scheduled for this meal")
 

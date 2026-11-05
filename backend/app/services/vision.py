@@ -11,7 +11,7 @@ from PIL import Image, UnidentifiedImageError
 
 from ..config import settings
 
-LABELS = ["rice", "dal_gravy", "curry", "vegetables", "bread", "fried_snack", "unknown"]
+LABELS = ["rice", "dal_gravy", "vegetable_curry", "vegetables", "bread", "vegetarian_snack", "unknown"]
 ALLOWED = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 MODEL_NAME = "color-heuristic-v1"
 
@@ -38,8 +38,8 @@ def classify(img: Image.Image):
     h, s, v = arr[:, 0] * 360 / 255, arr[:, 1] / 255, arr[:, 2] / 255
     f = lambda m: float(m.mean())
     raw = {"rice": f((s < 0.2) & (v > 0.6)), "dal_gravy": f((h >= 35) & (h < 70) & (s >= 0.3) & (v > 0.4)) * 1.1,
-           "curry": f(((h < 20) | (h > 340)) & (s >= 0.3) & (v > 0.2)), "vegetables": f((h >= 70) & (h < 170) & (s >= 0.25) & (v > 0.2)) * 1.2,
-           "bread": f((h >= 20) & (h < 40) & (s >= 0.2) & (s < 0.55) & (v > 0.5)), "fried_snack": f((h >= 20) & (h < 35) & (s >= 0.55) & (v > 0.3)) * 0.9}
+           "vegetable_curry": f(((h < 20) | (h > 340)) & (s >= 0.3) & (v > 0.2)), "vegetables": f((h >= 70) & (h < 170) & (s >= 0.25) & (v > 0.2)) * 1.2,
+           "bread": f((h >= 20) & (h < 40) & (s >= 0.2) & (s < 0.55) & (v > 0.5)), "vegetarian_snack": f((h >= 20) & (h < 35) & (s >= 0.55) & (v > 0.3)) * 0.9}
     tot = sum(raw.values())
     top = max(raw, key=raw.get)
     if tot < 0.08:

@@ -25,7 +25,7 @@ def outcome_frame(db: Session, inst_id: int, start: Optional[date] = None, end: 
          .select_from(P).join(S, S.id == P.schedule_id).join(M, M.id == P.menu_item_id)
          .join(C, and_(C.schedule_id == P.schedule_id, C.menu_item_id == P.menu_item_id))
          .outerjoin(w, and_(w.c.sid == P.schedule_id, w.c.mid == P.menu_item_id))
-         .filter(S.institution_id == inst_id))
+         .filter(S.institution_id == inst_id, M.is_active.is_(True), M.diet.in_(("veg", "vegan"))))
     if start:
         q = q.filter(S.date >= start)
     if end:

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..food_policy import food_is_allowed, ingredients_list, is_eligible_menu_item, require_vegetarian_food
 from ..models import (CollectionRecord, Institution, MealSchedule, MenuItem, NGOPartner, RedistributionRequest, SurplusListing, User, WasteRecord)
 from ..security import Ctx, get_ctx, need
 from ..services.surplus_rules import evaluate
@@ -18,7 +19,7 @@ STORAGE = ("hot_held", "refrigerated", "room_temp", "frozen")
 
 
 def lout(db, l, with_requests=False):
-    d = {c: getattr(l, c) for c in ("id", "food_name", "category", "quantity_kg", "portions", "prepared_at", "storage_condition", "storage_temp_c",
+    d = {c: getattr(l, c) for c in ("id", "food_name", "diet", "ingredients", "category", "quantity_kg", "portions", "prepared_at", "storage_condition", "storage_temp_c",
                                     "use_by", "status", "auto_check", "review_notes", "verified_at", "created_at", "schedule_id", "menu_item_id")}
     if with_requests:
         d["requests"] = db.query(RedistributionRequest).filter_by(listing_id=l.id).count()
@@ -28,9 +29,27 @@ def lout(db, l, with_requests=False):
 def refresh(db, l):
     """An eligible listing that no longer passes the time-based rules is expired automatically."""
     if l.status == "eligible":
+        if not listing_food_is_valid(db, l):
+            l.status = "ineligible"
+            db.commit()
+            return
         inst = db.get(Institution, l.institution_id)
         if not all(c["passed"] for c in evaluate(merged_settings(inst), l.category, l.prepared_at, l.storage_condition, l.storage_temp_c, l.use_by, local_now())):
             l.status = "expired"; db.commit()
+
+
+def listing_food_is_valid(db, listing):
+    if listing.diet not in ("veg", "vegan") or not food_is_allowed(listing.food_name, listing.ingredients):
+        return False
+    if listing.menu_item_id:
+        item = db.get(MenuItem, listing.menu_item_id)
+        return bool(
+            is_eligible_menu_item(item)
+            and listing.food_name.strip().casefold() == item.name.strip().casefold()
+            and listing.diet == item.diet
+            and ingredients_list(listing.ingredients) == ingredients_list(item.ingredients)
+        )
+    return True
 
 
 def partner_ok(db, user):
@@ -44,6 +63,8 @@ class ListIn(BaseModel):
     schedule_id: Optional[int] = None
     menu_item_id: Optional[int] = None
     food_name: str = Field(min_length=2, max_length=150)
+    diet: Literal["veg", "vegan"]
+    ingredients: list[str] = Field(min_length=1, max_length=50)
     category: str
     quantity_kg: float = Field(gt=0, le=10000)
     portions: int = Field(default=0, ge=0, le=100000)
@@ -59,10 +80,23 @@ def create(b: ListIn, ctx: Ctx = Depends(need("mess_admin", "kitchen")), db: Ses
         raise HTTPException(422, "Invalid category or storage condition")
     if b.prepared_at > local_now() + timedelta(minutes=5):
         raise HTTPException(422, "Preparation time cannot be in the future")
+    require_vegetarian_food(b.food_name, b.ingredients)
     if b.schedule_id:
         sc = db.get(MealSchedule, b.schedule_id)
         if not sc or sc.institution_id != ctx.inst_id:
             raise HTTPException(404, "Schedule not found")
+    if b.menu_item_id:
+        item = db.get(MenuItem, b.menu_item_id)
+        if not item or item.institution_id != ctx.inst_id:
+            raise HTTPException(404, "Dish not found")
+        if not is_eligible_menu_item(item):
+            raise HTTPException(422, "Only active vegetarian dishes can be redistributed")
+        if b.food_name.strip().casefold() != item.name.strip().casefold() or b.diet != item.diet:
+            raise HTTPException(422, "Surplus classification must match the selected menu item")
+        if ingredients_list(b.ingredients) != ingredients_list(item.ingredients):
+            raise HTTPException(422, "Surplus ingredients must match the selected menu item")
+        if b.schedule_id and not db.query(WasteRecord).filter_by(schedule_id=b.schedule_id, menu_item_id=item.id).first():
+            raise HTTPException(422, "The selected dish was not recorded for this meal")
     cfg = merged_settings(db.get(Institution, ctx.inst_id))
     checks = evaluate(cfg, b.category, b.prepared_at, b.storage_condition, b.storage_temp_c, b.use_by, local_now())
     ok = all(c["passed"] for c in checks)
@@ -81,9 +115,12 @@ def suggestions(ctx: Ctx = Depends(need("mess_admin", "kitchen")), db: Session =
     listed = {(i, j) for i, j in db.query(SurplusListing.schedule_id, SurplusListing.menu_item_id).filter_by(institution_id=ctx.inst_id)}
     rows = (db.query(WasteRecord, MealSchedule, MenuItem).join(MealSchedule, MealSchedule.id == WasteRecord.schedule_id)
             .join(MenuItem, MenuItem.id == WasteRecord.menu_item_id)
-            .filter(MealSchedule.institution_id == ctx.inst_id, MealSchedule.date >= since, WasteRecord.edible_qty > 0, WasteRecord.source == "manual").all())
+            .filter(MealSchedule.institution_id == ctx.inst_id, MealSchedule.date >= since, WasteRecord.edible_qty > 0,
+                    WasteRecord.source == "manual", MenuItem.is_active.is_(True), MenuItem.diet.in_(("veg", "vegan"))).all())
     return [{"schedule_id": s.id, "menu_item_id": m.id, "food_name": m.name, "edible_kg": w.edible_qty, "date": s.date.isoformat(), "meal_type": s.meal_type,
-             "suggested_portions": int(w.edible_qty / m.portion_kg) if m.portion_kg else 0} for w, s, m in rows if (s.id, m.id) not in listed]
+             "diet": m.diet, "ingredients": m.ingredients or [],
+             "suggested_portions": int(w.edible_qty / m.portion_kg) if m.portion_kg else 0}
+            for w, s, m in rows if (s.id, m.id) not in listed and is_eligible_menu_item(m)]
 
 
 @router.get("")
@@ -91,7 +128,9 @@ def list_listings(status: Optional[str] = None, ctx: Ctx = Depends(get_ctx), db:
     u = ctx.user
     if u.role == "ngo":
         partner_ok(db, u)
-        q = db.query(SurplusListing).filter(SurplusListing.status == "eligible")
+        q = db.query(SurplusListing).filter(
+            SurplusListing.status == "eligible", SurplusListing.diet.in_(("veg", "vegan"))
+        )
     elif u.role in ("mess_admin", "kitchen", "super_admin"):
         q = db.query(SurplusListing).filter(SurplusListing.institution_id == ctx.inst_id)
     else:
@@ -102,7 +141,7 @@ def list_listings(status: Optional[str] = None, ctx: Ctx = Depends(get_ctx), db:
     for l in rows:
         refresh(db, l)
     if u.role == "ngo":
-        rows = [l for l in rows if l.status == "eligible"]
+        rows = [l for l in rows if l.status == "eligible" and listing_food_is_valid(db, l)]
     return [lout(db, l, True) for l in rows]
 
 
@@ -120,6 +159,10 @@ def review(lid: int, b: ReviewIn, ctx: Ctx = Depends(need("mess_admin")), db: Se
     if l.status not in ("pending_review", "eligible"):
         raise HTTPException(409, f"Listing is {l.status} and cannot be reviewed")
     if b.decision == "approve":
+        if not listing_food_is_valid(db, l):
+            l.status = "ineligible"
+            db.commit()
+            raise HTTPException(409, "Only verified vegetarian surplus can be approved")
         if not b.checklist_confirmed:
             raise HTTPException(422, "A responsible person must confirm the food-safety checklist (visual inspection, temperature, packaging, transport)")
         cfg = merged_settings(db.get(Institution, ctx.inst_id))
@@ -177,23 +220,26 @@ def request_collection(lid: int, b: ReqIn = ReqIn(), ctx: Ctx = Depends(need("ng
 def rout(db, r):
     l, n = db.get(SurplusListing, r.listing_id), db.get(NGOPartner, r.partner_id)
     c = db.query(CollectionRecord).filter_by(request_id=r.id).first()
-    return {"id": r.id, "listing_id": l.id, "food_name": l.food_name, "quantity_kg": l.quantity_kg, "status": r.status, "pickup_time": r.pickup_time,
+    return {"id": r.id, "listing_id": l.id, "food_name": l.food_name, "diet": l.diet, "quantity_kg": l.quantity_kg, "status": r.status, "pickup_time": r.pickup_time,
             "message": r.message, "org_name": n.org_name if n else None, "created_at": r.created_at, "listing_status": l.status,
             "collected_kg": c.collected_kg if c else None, "portions": c.portions if c else None}
 
 
 @router.get("/requests/all")
 def requests(status: Optional[str] = None, ctx: Ctx = Depends(get_ctx), db: Session = Depends(get_db)):
-    q = db.query(RedistributionRequest)
+    q = db.query(RedistributionRequest).join(
+        SurplusListing, SurplusListing.id == RedistributionRequest.listing_id
+    ).filter(SurplusListing.diet.in_(("veg", "vegan")))
     if ctx.user.role == "ngo":
         q = q.filter(RedistributionRequest.partner_id == ctx.user.id)
     elif ctx.user.role in ("mess_admin", "kitchen", "super_admin"):
-        q = q.join(SurplusListing, SurplusListing.id == RedistributionRequest.listing_id).filter(SurplusListing.institution_id == ctx.inst_id)
+        q = q.filter(SurplusListing.institution_id == ctx.inst_id)
     else:
         raise HTTPException(403, "You do not have permission for this action")
     if status:
         q = q.filter(RedistributionRequest.status == status)
-    return [rout(db, r) for r in q.order_by(RedistributionRequest.id.desc()).limit(200)]
+    rows = q.order_by(RedistributionRequest.id.desc()).limit(200).all()
+    return [rout(db, r) for r in rows if listing_food_is_valid(db, db.get(SurplusListing, r.listing_id))]
 
 
 class DecideIn(BaseModel):
@@ -211,7 +257,7 @@ def decide(rid: int, b: DecideIn, ctx: Ctx = Depends(need("mess_admin")), db: Se
         raise HTTPException(409, f"Request is already {r.status}")
     if b.approve:
         refresh(db, l)
-        if l.status != "eligible":
+        if l.status != "eligible" or not listing_food_is_valid(db, l):
             raise HTTPException(409, "Listing is no longer eligible")
         r.status, r.pickup_time, r.decided_by, l.status = "approved", b.pickup_time, ctx.user.id, "approved"
         for o in db.query(RedistributionRequest).filter(RedistributionRequest.listing_id == l.id, RedistributionRequest.id != r.id, RedistributionRequest.status == "pending"):
@@ -237,6 +283,8 @@ def update_status(rid: int, b: StatusIn, ctx: Ctx = Depends(need("ngo")), db: Se
     if not r or r.partner_id != ctx.user.id:
         raise HTTPException(404, "Request not found")
     l = db.get(SurplusListing, r.listing_id)
+    if not listing_food_is_valid(db, l):
+        raise HTTPException(409, "This listing is not verified vegetarian surplus")
     flow = {"approved": ("picked_up", "cancelled"), "picked_up": ("delivered",)}
     if b.status not in flow.get(r.status, ()):
         raise HTTPException(409, f"Cannot move a request from {r.status} to {b.status}")

@@ -137,7 +137,7 @@ export function MenuManagement() {
   const [start, setStart] = useState(iso(new Date()))
   const sch = useFetch<any[]>(`/menu/schedules?start=${start}&end=${iso(addDays(new Date(start), 6))}`)
   const { run, busy } = useAction()
-  const [d, setD] = useState<any>({ category: 'other', diet: 'veg' })
+  const [d, setD] = useState<any>({ category: 'other', diet: 'veg', ingredients: '' })
   const [s, setS] = useState<any>({ date: iso(addDays(new Date(), 1)), meal_type: 'lunch', dish_ids: [], is_holiday: false, event: '' })
   const toggle = (id: number) => setS({ ...s, dish_ids: s.dish_ids.includes(id) ? s.dish_ids.filter((x: number) => x !== id) : [...s.dish_ids, id] })
   return (
@@ -148,9 +148,10 @@ export function MenuManagement() {
         <Card title="Add dish"><div className="space-y-3">
           <Field label="Name"><Input value={d.name || ''} onChange={(e: any) => setD({ ...d, name: e.target.value })} /></Field>
           <div className="grid grid-cols-2 gap-3"><Field label="Category"><Select value={d.category} onChange={(e: any) => setD({ ...d, category: e.target.value })}>{['grain', 'dal', 'curry', 'bread', 'vegetable', 'snack', 'beverage', 'dairy', 'breakfast', 'dessert', 'other'].map((c) => <option key={c}>{c}</option>)}</Select></Field>
-            <Field label="Diet"><Select value={d.diet} onChange={(e: any) => setD({ ...d, diet: e.target.value })}>{['veg', 'egg', 'non_veg', 'vegan'].map((c) => <option key={c} value={c}>{cap(c)}</option>)}</Select></Field>
+            <Field label="Diet"><Select value={d.diet} onChange={(e: any) => setD({ ...d, diet: e.target.value })}><option value="veg">Lacto-vegetarian</option><option value="vegan">Vegan</option></Select></Field>
             <Field label="Portion (kg cooked)"><Input type="number" step="0.01" value={d.portion_kg || ''} onChange={(e: any) => setD({ ...d, portion_kg: +e.target.value })} /></Field><Field label="Cost per kg"><Input type="number" value={d.cost_per_kg ?? ''} onChange={(e: any) => setD({ ...d, cost_per_kg: +e.target.value })} /></Field></div>
-          <Btn loading={busy} onClick={() => run(async () => { await api('/menu/items', { body: d }); setD({ category: 'other', diet: 'veg' }); items.reload() }, 'Dish added')}>Add dish</Btn></div></Card>
+          <Field label="Ingredients (comma-separated)" hint="Declare every ingredient; animal products, meat, fish, seafood and eggs are not allowed"><Input required value={d.ingredients} onChange={(e: any) => setD({ ...d, ingredients: e.target.value })} placeholder="e.g. lentils, tomato, spices" /></Field>
+          <Btn loading={busy} onClick={() => run(async () => { await api('/menu/items', { body: { ...d, ingredients: d.ingredients.split(',').map((i: string) => i.trim()).filter(Boolean) } }); setD({ category: 'other', diet: 'veg', ingredients: '' }); items.reload() }, 'Dish added')}>Add dish</Btn></div></Card>
         <Card title="Dishes" className="lg:col-span-2"><Async f={items}>{(rows) => <Table rows={rows} cols={[{ h: 'Dish', r: (r) => r.name }, { h: 'Category', r: (r) => cap(r.category) }, { h: 'Diet', r: (r) => cap(r.diet) }, { h: 'Portion kg', r: (r) => r.portion_kg, cls: 'text-right' }, { h: 'Cost/kg', r: (r) => r.cost_per_kg, cls: 'text-right' }]} />}</Async></Card></div>
         : <div className="grid gap-6 lg:grid-cols-3">
           <Card title="Add meal to schedule"><div className="space-y-3">

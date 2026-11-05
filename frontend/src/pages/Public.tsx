@@ -19,13 +19,13 @@ export function Landing() {
   return (
     <div className="min-h-screen bg-white">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-        <div className="flex items-center gap-2 font-semibold"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white"><Activity className="h-4 w-4" /></div>PlateSense AI</div>
+        <div className="flex items-center gap-2 font-semibold"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white"><Activity className="h-4 w-4" /></div>Shakambari AI</div>
         <div className="flex gap-2"><Link to="/login" className="btn-secondary">Log in</Link><Link to="/register" className="btn-primary">Register</Link></div>
       </header>
       <section className="mx-auto max-w-6xl px-4 py-16 md:py-24">
         <p className="mb-3 text-sm font-medium text-brand-700">Food management for campuses, hostels and canteens</p>
         <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-slate-900 md:text-5xl">Think Smart. Serve Right. Waste Less.</h1>
-        <p className="mt-5 max-w-2xl text-lg text-slate-600">PlateSense AI connects student meal bookings, kitchen preparation, waste records and verified food redistribution so every meal is cooked from evidence instead of guesswork.</p>
+        <p className="mt-5 max-w-2xl text-lg text-slate-600">Shakambari AI connects student meal bookings, kitchen preparation, waste records and verified food redistribution for a strict lacto-vegetarian food ecosystem.</p>
         <div className="mt-8 flex gap-3"><Link to="/register" className="btn-primary px-5 py-2.5">Get started</Link><Link to="/login" className="btn-secondary px-5 py-2.5">Log in</Link></div>
       </section>
       <section className="border-t bg-slate-50 py-14">
@@ -35,13 +35,13 @@ export function Landing() {
           <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{MODULES.map(([Icon, t, d]) => <div key={t} className="card p-5"><Icon className="mb-3 h-5 w-5 text-brand-600" /><div className="font-medium">{t}</div><p className="mt-1 text-sm text-slate-500">{d}</p></div>)}</div>
         </div>
       </section>
-      <footer className="py-8 text-center text-xs text-slate-400">PlateSense AI</footer>
+      <footer className="py-8 text-center text-xs text-slate-400">Shakambari AI · Strictly lacto-vegetarian</footer>
     </div>
   )
 }
 
 function AuthFrame({ title, sub, children }: any) {
-  return <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4"><div className="w-full max-w-md"><Link to="/" className="mb-6 flex items-center justify-center gap-2 font-semibold"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white"><Activity className="h-4 w-4" /></div>PlateSense AI</Link><div className="card p-6"><h1 className="text-xl font-semibold">{title}</h1><p className="mb-5 mt-1 text-sm text-slate-500">{sub}</p>{children}</div></div></div>
+  return <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4"><div className="w-full max-w-md"><Link to="/" className="mb-6 flex items-center justify-center gap-2 font-semibold"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white"><Activity className="h-4 w-4" /></div>Shakambari AI</Link><div className="card p-6"><h1 className="text-xl font-semibold">{title}</h1><p className="mb-5 mt-1 text-sm text-slate-500">{sub}</p>{children}</div></div></div>
 }
 
 export function Login() {
@@ -81,7 +81,7 @@ export function Register() {
         <Field label="Password" hint="At least 8 characters with a letter and a number"><Input type="password" required minLength={8} autoComplete="new-password" onChange={set('password')} /></Field>
         {role === 'student' ? <>
           <Field label="Institution"><Select required value={f.institution_id || ''} onChange={set('institution_id')}>{insts.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</Select></Field>
-          <div className="grid grid-cols-2 gap-3"><Field label="Diet"><Select value={f.diet} onChange={set('diet')}><option value="veg">Vegetarian</option><option value="egg">Eggetarian</option><option value="non_veg">Non-vegetarian</option><option value="vegan">Vegan</option></Select></Field><Field label="Hostel / block"><Input onChange={set('hostel')} /></Field></div>
+          <div className="grid grid-cols-2 gap-3"><Field label="Diet"><Select value={f.diet} onChange={set('diet')}><option value="veg">Lacto-vegetarian</option><option value="vegan">Vegan</option></Select></Field><Field label="Hostel / block"><Input onChange={set('hostel')} /></Field></div>
         </> : <>
           <Field label="Organisation name"><Input required onChange={set('org_name')} /></Field>
           <Field label="Registration number" hint="Self-declared; verified manually by the mess administrator"><Input onChange={set('registration_no')} /></Field>

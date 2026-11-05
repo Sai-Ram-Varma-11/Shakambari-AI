@@ -1,5 +1,5 @@
 import logging, re
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, StringConstraints
@@ -43,7 +43,7 @@ class RegisterIn(BaseModel):
     role: str = "student"
     institution_id: Optional[int] = None
     phone: Optional[str] = None
-    diet: Optional[str] = "veg"
+    diet: Optional[Literal["veg", "vegan"]] = "veg"
     hostel: Optional[str] = None
     org_name: Optional[str] = None
     registration_no: Optional[str] = None
@@ -68,8 +68,6 @@ def register(b: RegisterIn, request: Request, db: Session = Depends(get_db)):
         inst = db.get(Institution, b.institution_id) if b.institution_id else None
         if not inst:
             raise HTTPException(422, "Select a valid institution")
-        if b.diet not in ("veg", "egg", "non_veg", "vegan"):
-            raise HTTPException(422, "Invalid diet")
         u = User(email=email, name=b.name, password_hash=hash_password(b.password), role="student",
                  institution_id=inst.id, phone=b.phone, is_approved=True)
         db.add(u); db.flush()
@@ -118,7 +116,7 @@ def me(u: User = Depends(current_user), db: Session = Depends(get_db)):
 class ProfileIn(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
-    diet: Optional[str] = None
+    diet: Optional[Literal["veg", "vegan"]] = None
     hostel: Optional[str] = None
     dietary_notes: Optional[str] = None
 
@@ -133,8 +131,6 @@ def update_me(b: ProfileIn, u: User = Depends(current_user), db: Session = Depen
         p = db.get(StudentProfile, u.id) or StudentProfile(user_id=u.id)
         db.add(p)
         if b.diet:
-            if b.diet not in ("veg", "egg", "non_veg", "vegan"):
-                raise HTTPException(422, "Invalid diet")
             p.diet = b.diet
         if b.hostel is not None:
             p.hostel = b.hostel[:80]

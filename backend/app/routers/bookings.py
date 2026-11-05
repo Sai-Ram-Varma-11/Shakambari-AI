@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..food_policy import is_eligible_menu_item
 from ..models import (Attendance, Booking, BookingCancellation, DishPreference, MealSchedule, MenuItem, Rating,
                       ScheduleDish, User)
 from ..security import Ctx, get_ctx, need
@@ -29,6 +30,12 @@ class BookIn(BaseModel):
 @router.post("/bookings", status_code=201)
 def book(b: BookIn, ctx: Ctx = Depends(need("student")), db: Session = Depends(get_db)):
     s = _sched(db, b.schedule_id, ctx)
+    if s.date >= local_now().date():
+        dishes = db.query(MenuItem).join(ScheduleDish, ScheduleDish.menu_item_id == MenuItem.id).filter(
+            ScheduleDish.schedule_id == s.id
+        ).all()
+        if not dishes or any(not is_eligible_menu_item(item) for item in dishes):
+            raise HTTPException(409, "This meal does not have a verified vegetarian menu")
     if s.is_holiday:
         raise HTTPException(400, "No meal service on this day")
     if local_now() >= s.cutoff_at:
@@ -103,6 +110,8 @@ def rate(b: RateIn, ctx: Ctx = Depends(need("student")), db: Session = Depends(g
     item = db.get(MenuItem, b.menu_item_id)
     if not item or item.institution_id != ctx.inst_id:
         raise HTTPException(404, "Dish not found")
+    if not is_eligible_menu_item(item):
+        raise HTTPException(409, "Only active vegetarian dishes can be rated")
     if b.schedule_id:
         s = _sched(db, b.schedule_id, ctx)
         if not db.query(Attendance).filter_by(schedule_id=s.id, student_id=ctx.user.id).first():
@@ -126,6 +135,8 @@ def set_pref(b: PrefIn, ctx: Ctx = Depends(need("student")), db: Session = Depen
     item = db.get(MenuItem, b.menu_item_id)
     if not item or item.institution_id != ctx.inst_id:
         raise HTTPException(404, "Dish not found")
+    if not is_eligible_menu_item(item):
+        raise HTTPException(409, "Only active vegetarian dishes can have preferences")
     if b.preference not in (None, "like", "dislike"):
         raise HTTPException(422, "Preference must be like or dislike")
     p = db.query(DishPreference).filter_by(student_id=ctx.user.id, menu_item_id=b.menu_item_id).first()
@@ -142,7 +153,10 @@ def set_pref(b: PrefIn, ctx: Ctx = Depends(need("student")), db: Session = Depen
 
 @router.get("/bookings/preferences")
 def get_prefs(ctx: Ctx = Depends(need("student")), db: Session = Depends(get_db)):
-    return {m: p for m, p in db.query(DishPreference.menu_item_id, DishPreference.preference).filter_by(student_id=ctx.user.id)}
+    rows = db.query(DishPreference.menu_item_id, DishPreference.preference, MenuItem).join(
+        MenuItem, MenuItem.id == DishPreference.menu_item_id
+    ).filter(DishPreference.student_id == ctx.user.id).all()
+    return {mid: preference for mid, preference, item in rows if is_eligible_menu_item(item)}
 
 
 # ---- manager / kitchen views of Module 4 data ----

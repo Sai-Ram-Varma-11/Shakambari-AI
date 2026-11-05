@@ -5,6 +5,7 @@ from datetime import timedelta
 import pandas as pd
 import pytest
 from PIL import Image
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Attendance, Booking, ConsumptionRecord, MealSchedule, WasteRecord
 from app.services import analytics as A
@@ -46,6 +47,7 @@ def test_register_login_and_me(call, client):
     assert call("post", "/auth/register", json={"name": "Dup", "email": "t1@x.test", "password": "Passw0rdX", "role": "student", "institution_id": inst}).status_code == 409
     assert call("post", "/auth/register", json={"name": "Weak", "email": "w@x.test", "password": "short", "role": "student", "institution_id": inst}).status_code == 422
     assert call("post", "/auth/register", json={"name": "Evil", "email": "e@x.test", "password": "Passw0rdX", "role": "super_admin", "institution_id": inst}).status_code == 403
+    assert call("post", "/auth/register", json={"name": "Egg eater", "email": "egg@x.test", "password": "Passw0rdX", "role": "student", "institution_id": inst, "diet": "egg"}).status_code == 422
     assert call("post", "/auth/login", json={"email": "t1@x.test", "password": "wrong"}).status_code == 401
     me = call("get", "/auth/me", who="t1@x.test", pw="Passw0rdX").json()
     assert me["role"] == "student" and "password" not in str(me).lower()
@@ -90,7 +92,7 @@ def test_ngo_approval_flow(call):
 def test_menu_and_booking_flow(call, db):
     items = call("get", "/menu/items", who=MGR).json()
     rice = next(i for i in items if i["name"] == "Rice")
-    r = call("post", "/menu/items", who=MGR, json={"name": "Test Khichdi", "category": "grain", "diet": "veg", "portion_kg": 0.2, "cost_per_kg": 50})
+    r = call("post", "/menu/items", who=MGR, json={"name": "Test Khichdi", "category": "grain", "diet": "veg", "ingredients": ["rice", "lentils", "spices"], "portion_kg": 0.2, "cost_per_kg": 50})
     assert r.status_code == 201; S["khichdi"] = r.json()["id"]; S["rice"] = rice["id"]
     d = (today() + timedelta(days=10)).isoformat()
     r = call("post", "/menu/schedules", who=MGR, json={"date": d, "meal_type": "lunch", "dish_ids": [S["rice"], S["khichdi"]]})
@@ -117,6 +119,41 @@ def test_booking_cutoff_enforced(call):
     assert r.status_code == 400 and "cutoff" in r.json()["detail"].lower()
 
 
+def test_vegetarian_menu_policy(call, db):
+    from sqlalchemy import text
+    from app.db import engine
+    from app.models import MenuItem
+
+    assert all(item["diet"] in ("veg", "vegan") for item in call("get", "/menu/items", who=MGR).json())
+    base = {"category": "curry", "diet": "veg", "ingredients": ["tomato", "spices"], "portion_kg": 0.2, "cost_per_kg": 100}
+    for rejected in (
+        {**base, "name": "Chicken Curry"},
+        {**base, "name": "Garden Curry", "ingredients": ["tomato", "egg"]},
+        {**base, "name": "Garden Curry", "diet": "non_veg"},
+    ):
+        assert call("post", "/menu/items", who=MGR, json=rejected).status_code == 422
+
+    legacy = MenuItem(institution_id=S["inst"], name="Historical Chicken Curry", diet="non_veg", is_active=False,
+                      category="curry", ingredients=None, portion_kg=0.2, cost_per_kg=100)
+    db.add(legacy); db.commit()
+    assert legacy.id not in {item["id"] for item in call("get", "/menu/items", who=MGR).json()}
+    d = (today() + timedelta(days=20)).isoformat()
+    rejected_schedule = call("post", "/menu/schedules", who=MGR, json={"date": d, "meal_type": "dinner", "dish_ids": [legacy.id]})
+    assert rejected_schedule.status_code == 422
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO menu_items (institution_id, name, category, diet, ingredients, portion_kg, cost_per_kg, is_active) "
+            "VALUES (:inst, 'Eggplant Curry', 'curry', 'veg', '[\"eggplant\", \"tomato\"]', 0.2, 100, 1)"
+        ), {"inst": S["inst"]})
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO menu_items (institution_id, name, category, diet, ingredients, portion_kg, cost_per_kg, is_active) "
+                "VALUES (:inst, 'Garden Curry', 'curry', 'veg', '[\"chicken\"]', 0.2, 100, 1)"
+            ), {"inst": S["inst"]})
+
+
 def test_attendance_and_participation(call, db):
     sid = S["sid"]
     assert call("post", f"/attendance/{sid}/mark", who=KIT, json={"student_email": "t1@x.test"}).status_code == 201   # booked
@@ -135,6 +172,8 @@ def test_prediction_uses_bookings(call):
     p = r.json()[0]
     assert p["active_bookings"] == 2 and p["cancellations"] == 1
     assert p["lower"] <= p["predicted_attendance"] <= p["upper"] and p["confidence"] in ("high", "medium", "low")
+    eligible_ids = {item["id"] for item in call("get", "/menu/items", who=MGR).json()}
+    assert all(d["menu_item_id"] in eligible_ids for d in p["dishes"])
     k = next(d for d in p["dishes"] if d["menu_item_id"] == S["khichdi"])
     assert k["uptake_source"] == "default_assumption"           # no history for a brand-new dish
     assert p["model"]["data_mode"] == "demo"
@@ -211,10 +250,12 @@ def test_surplus_workflow_and_sustainability(call, db):
     sug = call("get", "/surplus/suggestions", who=MGR).json()
     assert any(s["schedule_id"] == sid and s["edible_kg"] > 0 for s in sug)      # Module 2 -> 3
     n = local_now()
-    body = {"food_name": "Test rice", "category": "cooked", "quantity_kg": 3, "portions": 15, "prepared_at": (n - timedelta(hours=1)).isoformat(), "storage_condition": "hot_held", "storage_temp_c": 65, "use_by": (n + timedelta(hours=6)).isoformat(), "schedule_id": sid, "menu_item_id": S["rice"]}
+    body = {"food_name": "Rice", "diet": "vegan", "ingredients": ["rice", "water", "salt"], "category": "cooked", "quantity_kg": 3, "portions": 15, "prepared_at": (n - timedelta(hours=1)).isoformat(), "storage_condition": "hot_held", "storage_temp_c": 65, "use_by": (n + timedelta(hours=6)).isoformat(), "schedule_id": sid, "menu_item_id": S["rice"]}
+    assert call("post", "/surplus", who=KIT, json={**body, "food_name": "Chicken Curry"}).status_code == 422
+    assert call("post", "/surplus", who=KIT, json={**body, "food_name": "Garden Stew", "menu_item_id": None, "schedule_id": None, "ingredients": ["chicken"]}).status_code == 422
     l = call("post", "/surplus", who=KIT, json=body); assert l.status_code == 201 and l.json()["status"] == "pending_review"
     lid = l.json()["id"]
-    bad = call("post", "/surplus", who=KIT, json={**body, "food_name": "Cold hot food", "storage_temp_c": 40}).json()
+    bad = call("post", "/surplus", who=KIT, json={**body, "food_name": "Cold hot food", "menu_item_id": None, "schedule_id": None, "storage_temp_c": 40}).json()
     assert bad["status"] == "ineligible"
     assert call("post", "/surplus", who=KIT, json={**body, "prepared_at": (n + timedelta(hours=3)).isoformat()}).status_code == 422
     assert call("post", f"/surplus/{bad['id']}/review", who=MGR, json={"decision": "approve", "checklist_confirmed": True}).status_code == 409
@@ -234,7 +275,7 @@ def test_surplus_workflow_and_sustainability(call, db):
     assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "picked_up", "collected_kg": 9}).status_code == 422
     assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "picked_up", "collected_kg": 2.5, "portions": 12}).status_code == 200
     assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "delivered", "delivered_to": "Shelter"}).json()["status"] == "delivered"
-    assert any(h["food_name"] == "Test rice" for h in call("get", "/surplus/donations/history", who=NGO).json())
+    assert any(h["food_name"] == "Rice" for h in call("get", "/surplus/donations/history", who=NGO).json())
     m = metric()
     assert round(m["collected"]["value"] - c0, 2) == 2.5                                   # reflected in Module 8
     assert m["collected"]["type"] == "measured" and m["savings"]["type"] == "estimate" and m["co2e_avoided"]["type"] == "estimate" and m["waste_pct"]["type"] == "calculated"

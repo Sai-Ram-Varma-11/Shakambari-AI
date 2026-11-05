@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..food_policy import food_is_allowed, is_eligible_menu_item, require_vegetarian_food
 from ..models import (MEALS, Booking, Institution, MealSchedule, MenuItem, ScheduleDish)
 from ..security import Ctx, get_ctx, need
 from ..util import audit, default_cutoff, local_now, merged_settings
@@ -18,14 +19,15 @@ CATS = ("grain", "dal", "curry", "bread", "vegetable", "snack", "beverage", "dai
 class ItemIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     category: str = "other"
-    diet: str = "veg"
+    diet: Literal["veg", "vegan"] = "veg"
+    ingredients: List[str] = Field(min_length=1, max_length=50)
     portion_kg: float = Field(gt=0, le=2)
     cost_per_kg: float = Field(ge=0, le=100000)
     is_active: bool = True
 
 
 def item_out(i):
-    return {"id": i.id, "name": i.name, "category": i.category, "diet": i.diet, "portion_kg": i.portion_kg,
+    return {"id": i.id, "name": i.name, "category": i.category, "diet": i.diet, "ingredients": i.ingredients or [], "portion_kg": i.portion_kg,
             "cost_per_kg": i.cost_per_kg, "is_active": i.is_active}
 
 
@@ -33,13 +35,19 @@ def item_out(i):
 def items(ctx: Ctx = Depends(get_ctx), db: Session = Depends(get_db)):
     if ctx.inst_id is None:
         return []
-    return [item_out(i) for i in db.query(MenuItem).filter_by(institution_id=ctx.inst_id).order_by(MenuItem.name)]
+    rows = db.query(MenuItem).filter_by(institution_id=ctx.inst_id, is_active=True).filter(
+        MenuItem.diet.in_(("veg", "vegan"))
+    ).order_by(MenuItem.name)
+    return [item_out(i) for i in rows if is_eligible_menu_item(i)]
 
 
 @router.post("/items", status_code=201)
 def add_item(b: ItemIn, ctx: Ctx = Depends(need("mess_admin")), db: Session = Depends(get_db)):
-    if b.diet not in ("veg", "egg", "non_veg", "vegan") or b.category not in CATS:
-        raise HTTPException(422, "Invalid diet or category")
+    if b.category not in CATS:
+        raise HTTPException(422, "Invalid category")
+    require_vegetarian_food(b.name, b.ingredients)
+    for ingredient in b.ingredients:
+        require_vegetarian_food("ingredient", [ingredient])
     if db.query(MenuItem).filter_by(institution_id=ctx.inst_id, name=b.name.strip()).first():
         raise HTTPException(409, "A dish with this name already exists")
     i = MenuItem(institution_id=ctx.inst_id, **{**b.model_dump(), "name": b.name.strip()})
@@ -52,6 +60,13 @@ def edit_item(iid: int, b: ItemIn, ctx: Ctx = Depends(need("mess_admin")), db: S
     i = db.get(MenuItem, iid)
     if not i or i.institution_id != ctx.inst_id:
         raise HTTPException(404, "Dish not found")
+    if i.diet not in ("veg", "vegan") or not food_is_allowed(i.name, i.ingredients):
+        raise HTTPException(409, "Legacy non-vegetarian dishes are preserved as history and cannot be reclassified")
+    if b.category not in CATS:
+        raise HTTPException(422, "Invalid category")
+    require_vegetarian_food(b.name, b.ingredients)
+    for ingredient in b.ingredients:
+        require_vegetarian_food("ingredient", [ingredient])
     for k, v in b.model_dump().items():
         setattr(i, k, v)
     audit(db, ctx.user, "update_dish", "menu_item", i.id); db.commit()
@@ -60,6 +75,7 @@ def edit_item(iid: int, b: ItemIn, ctx: Ctx = Depends(need("mess_admin")), db: S
 
 def sched_out(db, s: MealSchedule, user=None):
     dishes = db.query(MenuItem).join(ScheduleDish, ScheduleDish.menu_item_id == MenuItem.id).filter(ScheduleDish.schedule_id == s.id).all()
+    dishes = [i for i in dishes if is_eligible_menu_item(i)]
     counts = dict(db.query(Booking.status, func.count()).filter(Booking.schedule_id == s.id).group_by(Booking.status).all())
     d = {"id": s.id, "date": s.date.isoformat(), "meal_type": s.meal_type, "cutoff_at": s.cutoff_at.isoformat(),
          "is_holiday": s.is_holiday, "event": s.event, "headcount": s.headcount, "service_status": s.service_status,
@@ -104,7 +120,13 @@ class SchedIn(BaseModel):
 
 def _set_dishes(db, s, dish_ids, inst_id):
     ids = set(dish_ids)
-    ok = {i for (i,) in db.query(MenuItem.id).filter(MenuItem.institution_id == inst_id, MenuItem.id.in_(ids))} if ids else set()
+    items = db.query(MenuItem).filter(
+        MenuItem.institution_id == inst_id,
+        MenuItem.id.in_(ids),
+        MenuItem.is_active.is_(True),
+        MenuItem.diet.in_(("veg", "vegan")),
+    ).all() if ids else []
+    ok = {i.id for i in items if is_eligible_menu_item(i)}
     if ok != ids:
         raise HTTPException(422, "One or more dishes do not belong to this institution")
     db.query(ScheduleDish).filter_by(schedule_id=s.id).delete()
