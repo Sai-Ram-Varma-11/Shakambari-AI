@@ -1,0 +1,16 @@
+# Optional: local PostgreSQL + API. The plain uvicorn + SQLite route needs none of this.
+services:
+  db:
+    image: postgres:16
+    environment: { POSTGRES_USER: platesense, POSTGRES_PASSWORD: platesense, POSTGRES_DB: platesense }
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://platesense:platesense@db:5432/platesense
+      SECRET_KEY: local-dev-secret-change-me-0123456789
+      CORS_ORIGINS: http://localhost:5173
+    ports: ["8000:8000"]
+    depends_on: [db]
+volumes: { pgdata: {} }

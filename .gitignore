@@ -1,0 +1,11 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.db
+backend/uploads/
+backend/model_store/
+backend/tests/_tmp/
