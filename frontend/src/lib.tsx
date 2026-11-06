@@ -34,7 +34,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   let r: Response
   try { r = await fetch(BASE + path, { method: opts.method || (body ? 'POST' : 'GET'), headers, body }) }
   catch { throw new Error('Cannot reach the server. Is the backend running?') }
-  if (r.status === 401 && t) { tokenStore.clear(); location.href = '/login' }
+  if (r.status === 401 && t) { tokenStore.clear(); location.href = '/' }
   if (opts.raw) { if (!r.ok) throw new Error('Request failed'); return (await r.blob()) as any }
   const ct = r.headers.get('content-type') || ''
   const data: any = ct.includes('json') ? await r.json() : await r.text()
