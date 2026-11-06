@@ -24,6 +24,21 @@ class Institution(Base):
     created_at = Column(DateTime, default=now)
 
 
+class InstitutionRequest(Base):
+    __tablename__ = "institution_requests"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    code = Column(String(40), nullable=False)
+    manager_name = Column(String(120), nullable=False)
+    email = Column(String(254), nullable=False)
+    password_hash = Column(String(300), nullable=False)
+    phone = Column(String(30))
+    status = Column(String(12), default="pending", nullable=False)
+    reviewed_by = Column(Integer)
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, default=now)
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, cap, fmtTime, num, useAction, useAuth, useFetch } from '../lib'
+import { api, cap, fmtTime, iso, num, useAction, useAuth, useFetch } from '../lib'
 import { Async, Badge, Btn, Card, Empty, Field, Input, PageHeader, Select, Stat, Status, Table } from '../ui'
 
 export function UsersPage() {
@@ -31,11 +31,11 @@ export function InstitutionSettings() {
       <PageHeader title="Institution settings" sub={`Data mode: ${inst.data.data_mode === 'demo' ? 'synthetic demonstration data' : 'real data'}`} action={<Btn loading={busy} onClick={() => run(async () => { await api('/institution', { method: 'PUT', body: { name, settings: s } }); inst.reload() }, 'Settings saved')}>Save changes</Btn>} />
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="General & forecasting"><div className="grid grid-cols-2 gap-3"><div className="col-span-2"><Field label="Institution name"><Input value={name} onChange={(e: any) => setName(e.target.value)} /></Field></div>
-          <Field label="Booking cutoff (hours before meal)"><Input type="number" value={s.booking_cutoff_hours} onChange={(e: any) => set('booking_cutoff_hours', +e.target.value)} /></Field>
           <Field label="Waste alert threshold (%)"><Input type="number" value={s.waste_alert_pct} onChange={(e: any) => set('waste_alert_pct', +e.target.value)} /></Field>
           <Field label="Preparation buffer (%)"><Input type="number" value={s.prep_buffer_pct} onChange={(e: any) => set('prep_buffer_pct', +e.target.value)} /></Field>
           <Field label="Currency"><Input value={s.currency} onChange={(e: any) => set('currency', e.target.value)} /></Field></div>
-          <div className="mt-4 label">Meal start times (24 h)</div><div className="grid grid-cols-4 gap-3">{Object.keys(s.meal_times).map((m) => <Field key={m} label={cap(m)}><Input value={s.meal_times[m]} onChange={(e: any) => set('meal_times', { ...s.meal_times, [m]: e.target.value })} /></Field>)}</div>
+          <div className="mt-4 label">Booking closes (hours before each meal)</div><div className="grid grid-cols-2 gap-3">{Object.keys(s.meal_cutoff_hours).map((m) => <Field key={m} label={cap(m)}><Input type="number" min="0" max="72" value={s.meal_cutoff_hours[m]} onChange={(e: any) => set('meal_cutoff_hours', { ...s.meal_cutoff_hours, [m]: +e.target.value })} /></Field>)}</div>
+          <div className="mt-4 label">Meal start times (24 h)</div><div className="grid grid-cols-2 gap-3">{Object.keys(s.meal_times).map((m) => <Field key={m} label={cap(m)}><Input value={s.meal_times[m]} onChange={(e: any) => set('meal_times', { ...s.meal_times, [m]: e.target.value })} /></Field>)}</div>
           <p className="mt-2 text-xs text-slate-400">Cutoff and times apply to meals scheduled after the change.</p></Card>
         <Card title="Redistribution eligibility rules"><div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">Defaults are illustrative only. Have your food-safety officer review these limits against local regulations before real use. Passing the rules never certifies food as safe - human review is always required.</div>
           <div className="grid grid-cols-2 gap-3"><Field label="Max hours since preparation"><Input type="number" value={s.eligibility.max_hours_since_prep} onChange={(e: any) => el('max_hours_since_prep', +e.target.value)} /></Field><Field label="Min hot-holding temp °C"><Input type="number" value={s.eligibility.hot_min_temp_c} onChange={(e: any) => el('hot_min_temp_c', +e.target.value)} /></Field>
@@ -64,16 +64,30 @@ export function Profile() {
 }
 
 export function AdminPage() {
-  const ov = useFetch<any>('/admin/overview'); const ins = useFetch<any[]>('/admin/institutions'); const audit = useFetch<any[]>('/admin/audit?limit=60'); const { run, busy } = useAction(); const [n, setN] = useState({ name: '', code: '' })
+  const ov = useFetch<any>('/admin/overview'); const ins = useFetch<any[]>('/admin/institutions'); const requests = useFetch<any[]>('/admin/institution-requests'); const audit = useFetch<any[]>('/admin/audit?limit=60'); const { run, busy } = useAction(); const [n, setN] = useState({ name: '', code: '' })
+  const [selected, setSelected] = useState(''); const [day, setDay] = useState(iso(new Date()))
+  const daily = useFetch<any>(selected ? `/admin/institutions/${selected}/daily?day=${day}` : null)
+  useEffect(() => { if (!selected && ins.data?.length) setSelected(String(ins.data[0].id)) }, [ins.data, selected])
   return (
     <div>
       <PageHeader title="Platform administration" sub="Cross-institution overview, institutions and recent activity." />
       <Async f={ov}>{(o) => <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5"><Stat label="Institutions" value={o.institutions} /><Stat label="Meal schedules" value={num(o.meal_schedules, 0)} /><Stat label="Bookings" value={num(o.bookings, 0)} /><Stat label="Surplus listings" value={o.surplus_listings} /><Stat label="Partners pending" value={o.pending_partners} tone={o.pending_partners ? 'warn' : 'good'} /></div>}</Async>
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card title="Institutions" className="lg:col-span-2"><Async f={ins}>{(rows) => <Table rows={rows} cols={[{ h: 'Name', r: (r) => r.name }, { h: 'Code', r: (r) => r.code }, { h: 'Data', r: (r) => <Badge tone={r.data_mode === 'demo' ? 'amber' : 'green'}>{r.data_mode === 'demo' ? 'Synthetic demo' : 'Real'}</Badge> }, { h: 'Users', r: (r) => r.users }]} />}</Async>
-          <p className="mt-3 text-xs text-slate-500">To act inside another institution, send the X-Institution-Id header via the API; the UI works within your home institution.</p></Card>
+        <Card title="Registered messes" className="lg:col-span-2"><Async f={ins}>{(rows) => <Table rows={rows} cols={[{ h: 'Mess', r: (r) => r.name }, { h: 'Code', r: (r) => r.code }, { h: 'Data', r: (r) => <Badge tone={r.data_mode === 'demo' ? 'amber' : 'green'}>{r.data_mode === 'demo' ? 'Synthetic demo' : 'Real'}</Badge> }, { h: 'Users', r: (r) => r.users }, { h: '', r: (r) => <Btn size="sm" variant="secondary" onClick={() => setSelected(String(r.id))}>View records</Btn> }]} />}</Async></Card>
         <Card title="Add institution"><div className="space-y-3"><Field label="Name"><Input value={n.name} onChange={(e: any) => setN({ ...n, name: e.target.value })} /></Field><Field label="Code"><Input value={n.code} onChange={(e: any) => setN({ ...n, code: e.target.value })} /></Field><Btn loading={busy} onClick={() => run(async () => { await api('/admin/institutions', { body: n }); setN({ name: '', code: '' }); ins.reload() }, 'Institution created')}>Create</Btn></div></Card>
       </div>
+      <Card title="Mess requests awaiting approval" className="mt-6"><Async f={requests}>{(rows) => <Table rows={rows} empty="No pending mess requests." cols={[
+        { h: 'Mess', r: (r) => <div><b>{r.name}</b><div className="text-xs text-slate-500">{r.code}</div></div> },
+        { h: 'Manager', r: (r) => <div>{r.manager_name}<div className="text-xs text-slate-500">{r.email}{r.phone ? ` · ${r.phone}` : ''}</div></div> },
+        { h: 'Requested', r: (r) => fmtTime(r.created_at) },
+        { h: '', r: (r) => <div className="flex gap-2"><Btn size="sm" loading={busy} onClick={() => run(async () => { await api(`/admin/institution-requests/${r.id}/approve`, { method: 'POST' }); requests.reload(); ins.reload() }, 'Mess approved; manager can now sign in')}>Approve</Btn><Btn size="sm" variant="secondary" loading={busy} onClick={() => run(async () => { await api(`/admin/institution-requests/${r.id}/reject`, { method: 'POST' }); requests.reload() }, 'Request rejected')}>Reject</Btn></div> },
+      ]} />}</Async></Card>
+      <Card title="Daily mess records" className="mt-6" action={<div className="flex flex-wrap gap-2"><Select className="w-52" value={selected} onChange={(e: any) => setSelected(e.target.value)}>{ins.data?.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}</Select><Input aria-label="Report date" type="date" className="w-40" value={day} onChange={(e: any) => setDay(e.target.value)} /></div>}>
+        <Async f={daily}>{(report) => report.meals.length ? <div className="space-y-4">{report.meals.map((meal: any) => <section key={meal.schedule_id} className="rounded-lg border border-slate-200 p-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{cap(meal.meal_type)}</h3><span className="text-xs text-slate-500">{meal.bookings} bookings · {meal.headcount ?? 'Attendance not recorded'} attended · {cap(meal.service_status)}</span></div>
+          <Table rows={meal.dishes} empty="No dishes published." cols={[{ h: 'Dish', r: (r) => r.name }, { h: 'Prepared kg', r: (r) => r.prepared_kg ?? '-' }, { h: 'Consumed kg', r: (r) => r.consumed_kg ?? '-' }, { h: 'Leftover kg', r: (r) => r.leftover_kg ?? '-' }, { h: 'Edible kg', r: (r) => r.edible_kg ?? '-' }, { h: 'Inedible kg', r: (r) => r.inedible_kg ?? '-' }]} />
+        </section>)}</div> : <Empty>No meal records for this mess on this day.</Empty>}</Async>
+      </Card>
       <Card title="Recent activity (audit log)" className="mt-6"><Async f={audit}>{(rows) => <Table rows={rows} cols={[{ h: 'When', r: (r) => fmtTime(r.created_at) }, { h: 'User', r: (r) => r.user || '-' }, { h: 'Action', r: (r) => r.action }, { h: 'Detail', r: (r) => r.detail || '' }]} />}</Async></Card>
     </div>
   )

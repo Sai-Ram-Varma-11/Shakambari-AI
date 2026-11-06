@@ -6,6 +6,7 @@ from .config import settings
 
 DEFAULT_SETTINGS = {
     "booking_cutoff_hours": 6,
+    "meal_cutoff_hours": {"breakfast": 6, "lunch": 6, "snacks": 6, "dinner": 6},
     "waste_alert_pct": 15,
     "prep_buffer_pct": 5,
     "currency": "INR",
@@ -40,7 +41,8 @@ def meal_start(d: date, meal: str, cfg: dict) -> datetime:
 
 
 def default_cutoff(d: date, meal: str, cfg: dict) -> datetime:
-    return meal_start(d, meal, cfg) - timedelta(hours=cfg["booking_cutoff_hours"])
+    hours = cfg.get("meal_cutoff_hours", {}).get(meal, cfg["booking_cutoff_hours"])
+    return meal_start(d, meal, cfg) - timedelta(hours=hours)
 
 
 def audit(db, user, action, entity=None, entity_id=None, detail=None):

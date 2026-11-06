@@ -44,16 +44,18 @@ export function StudentDashboard() {
 
 export function BookMeals() {
   const [start, setStart] = useState(iso(new Date()))
-  const sched = useFetch<any[]>(`/menu/schedules?start=${start}&end=${iso(addDays(new Date(start), 6))}`)
+  const sched = useFetch<any[]>(`/menu/schedules?start=${start}&end=${start}`)
   const prefs = useFetch<any>('/bookings/preferences')
   const { run } = useAction()
   const setPref = (id: number, p: string | null) => run(async () => { await api('/bookings/preferences', { method: 'PUT', body: { menu_item_id: id, preference: p } }); prefs.reload() })
   return (
     <div>
-      <PageHeader title="Book meals" sub="Bookings and cancellations help predict demand. Like or dislike dishes to share your preferences." action={<div className="flex items-center gap-2"><Btn variant="secondary" size="sm" onClick={() => setStart(iso(addDays(new Date(start), -7)))}>Previous week</Btn><Input type="date" value={start} onChange={(e: any) => setStart(e.target.value)} className="w-40" /><Btn variant="secondary" size="sm" onClick={() => setStart(iso(addDays(new Date(start), 7)))}>Next week</Btn></div>} />
+      <PageHeader title="Book meals" sub="Choose a date to see all four meals and their individual booking deadlines. Like or dislike dishes to share your preferences." action={<div className="flex items-center gap-2"><Btn variant="secondary" size="sm" onClick={() => setStart(iso(addDays(new Date(start), -1)))}>Previous day</Btn><Input type="date" aria-label="Choose meal date" value={start} onChange={(e: any) => setStart(e.target.value)} className="w-40" /><Btn variant="secondary" size="sm" onClick={() => setStart(iso(addDays(new Date(start), 1)))}>Next day</Btn></div>} />
       <Async f={sched}>{(rows) => {
-        const days = Array.from(new Set(rows.map((r: any) => r.date)))
-        return days.length ? <>{days.map((d: any) => <div key={d} className="mb-6"><h2 className="mb-2 text-sm font-semibold text-slate-700">{fmtDate(d)}</h2><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{MEALS.map((m) => rows.find((r: any) => r.date === d && r.meal_type === m)).filter(Boolean).map((s: any) => <MealCard key={s.id} s={s} prefs={prefs.data || {}} onPref={setPref} reload={sched.reload} />)}</div></div>)}</> : <Empty>No meals published for this week.</Empty>
+        const selectedMeals = MEALS.map((m) => ({ meal: m, schedule: rows.find((r: any) => r.date === start && r.meal_type === m) }))
+        return <div className="mb-6"><h2 className="mb-2 text-sm font-semibold text-slate-700">{fmtDate(start)}</h2><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{selectedMeals.map(({ meal, schedule }) => schedule
+          ? <MealCard key={schedule.id} s={schedule} prefs={prefs.data || {}} onPref={setPref} reload={sched.reload} />
+          : <div key={meal} className="card p-4"><div className="font-medium">{cap(meal)}</div><p className="mt-3 text-sm text-slate-400">Menu not published yet.</p></div>)}</div></div>
       }}</Async>
     </div>
   )

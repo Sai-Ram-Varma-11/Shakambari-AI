@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import ImageObservation, Institution
+from ..models import ImageObservation, Institution, MealSchedule, MenuItem, ScheduleDish
 from ..security import Ctx, need
 from ..services import analytics as A
 from ..util import local_now, merged_settings
@@ -48,6 +48,44 @@ def by_meal(start: Optional[date] = None, end: Optional[date] = None, ctx: Ctx =
     s, e = D(start, end)
     df = A.outcome_frame(db, ctx.inst_id, s, e)
     return A.records(A.aggregate(df, "meal_type")) if not df.empty else []
+
+
+@router.get("/recommendations")
+def recommendations(start: Optional[date] = None, end: Optional[date] = None,
+                    ctx: Ctx = Depends(need("mess_admin")), db: Session = Depends(get_db)):
+    today = local_now().date()
+    window_start, window_end = start or today - timedelta(days=29), end or today
+    df = A.outcome_frame(db, ctx.inst_id, window_start, window_end)
+    if df.empty:
+        return {"days_reviewed": max((window_end - window_start).days + 1, 0), "recommendations": []}
+    threshold = merged_settings(db.get(Institution, ctx.inst_id))["waste_alert_pct"]
+    grouped = df.groupby(["meal_type", "item_id", "item"], as_index=False).agg(
+        prepared=("prepared", "sum"), leftover=("leftover", "sum"), services=("schedule_id", "nunique"))
+    tomorrow_dishes = {
+        (s.meal_type, item_id)
+        for s in db.query(MealSchedule).filter_by(institution_id=ctx.inst_id, date=today + timedelta(days=1))
+        for (item_id,) in db.query(ScheduleDish.menu_item_id).filter_by(schedule_id=s.id)
+    }
+    out = []
+    for row in grouped.itertuples():
+        if row.prepared <= 0 or row.services < 2:
+            continue
+        waste_pct = row.leftover / row.prepared * 100
+        if waste_pct < threshold:
+            continue
+        reduction = min(35, max(10, round(waste_pct * 0.6)))
+        out.append({
+            "meal_type": row.meal_type,
+            "dish": row.item,
+            "services": int(row.services),
+            "leftover_kg": round(float(row.leftover), 1),
+            "waste_pct": round(float(waste_pct), 1),
+            "suggested_reduction_pct": reduction,
+            "scheduled_tomorrow": (row.meal_type, int(row.item_id)) in tomorrow_dishes,
+            "message": f"Cook about {reduction}% less {row.item} for {row.meal_type}. About {row.leftover:.1f} kg was left over in {int(row.services)} recent meals.",
+        })
+    out.sort(key=lambda r: (not r["scheduled_tomorrow"], -r["leftover_kg"]))
+    return {"days_reviewed": max((window_end - window_start).days + 1, 0), "threshold_pct": threshold, "recommendations": out[:12]}
 
 
 @router.get("/patterns")

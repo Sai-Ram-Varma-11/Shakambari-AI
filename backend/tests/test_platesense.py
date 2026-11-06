@@ -69,6 +69,36 @@ def test_protected_routes_and_roles(call):
     assert call("get", "/admin/overview", who=ADM).status_code == 200
 
 
+def test_mess_request_approval_and_daily_reports(call):
+    request = call("post", "/admin/institution-requests", json={
+        "name": "Approval Test Mess", "code": "APPROVAL-TEST", "manager_name": "Test Manager",
+        "email": "new-manager@test.example", "password": "ManagerPass123",
+    })
+    assert request.status_code == 201, request.text
+    request_id = request.json()["id"]
+    assert call("get", "/admin/institution-requests", who=MGR).status_code == 403
+    pending = call("get", "/admin/institution-requests", who=ADM).json()
+    assert any(r["id"] == request_id for r in pending)
+    approved = call("post", f"/admin/institution-requests/{request_id}/approve", who=ADM)
+    assert approved.status_code == 200, approved.text
+    inst_id = approved.json()["institution_id"]
+    owner = call("get", "/institution", who="new-manager@test.example", pw="ManagerPass123")
+    assert owner.status_code == 200 and owner.json()["name"] == "Approval Test Mess"
+
+    settings = {"meal_cutoff_hours": {"breakfast": 2, "lunch": 4, "snacks": 3, "dinner": 2}}
+    assert call("put", "/institution", who="new-manager@test.example", pw="ManagerPass123",
+                json={"settings": settings}).status_code == 200
+    meal_day = (today() + timedelta(days=10)).isoformat()
+    schedule = call("post", "/menu/schedules", who="new-manager@test.example", pw="ManagerPass123",
+                    json={"date": meal_day, "meal_type": "breakfast"})
+    assert schedule.status_code == 201, schedule.text
+    assert schedule.json()["cutoff_at"].endswith("T05:30:00")
+    report = call("get", f"/admin/institutions/{inst_id}/daily?day={meal_day}", who=ADM)
+    assert report.status_code == 200, report.text
+    assert report.json()["meals"][0]["meal_type"] == "breakfast"
+    assert call("get", f"/admin/institutions/{inst_id}/daily?day={meal_day}", who=MGR).status_code == 403
+
+
 def test_password_reset(call):
     r = call("post", "/auth/forgot-password", json={"email": "t3@x.test"}).json()
     tok = r["dev_reset_token"]

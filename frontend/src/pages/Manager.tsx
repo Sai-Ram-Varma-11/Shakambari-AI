@@ -2,10 +2,17 @@ import { Fragment, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { addDays, api, cap, fmtDate, iso, num, useAction, useAuth, useFetch, MEALS } from '../lib'
-import { Async, Badge, Btn, Card, DataType, Empty, Field, Input, PageHeader, Select, Stat, Status, Table, Tabs } from '../ui'
+import { Async, Badge, Btn, Card, Empty, Field, Input, PageHeader, Select, Stat, Status, Table, Tabs } from '../ui'
 
 const chartProps = { margin: { top: 5, right: 10, left: 0, bottom: 0 } }
-const DemoNote = ({ m }: { m: any }) => m?.data_mode === 'demo' ? <Badge tone="amber">Trained on synthetic demonstration data</Badge> : null
+
+function RecommendationList({ rows }: { rows: any[] }) {
+  return rows.length ? <ul className="space-y-3">{rows.map((r) => <li key={`${r.meal_type}-${r.dish}`} className="rounded-lg border border-slate-200 p-3">
+    <div className="font-medium">{cap(r.meal_type)}: {r.dish}</div>
+    <p className="mt-1 text-sm">{r.message}</p>
+    <p className="mt-1 text-xs text-slate-500">{r.scheduled_tomorrow ? 'This dish is on tomorrow’s menu.' : 'Use this suggestion the next time this meal is planned.'}</p>
+  </li>)}</ul> : <Empty>No clear changes yet. Record preparation and leftovers for more meals to get useful suggestions.</Empty>
+}
 
 export function ManagerDashboard() {
   const { user } = useAuth(); const isMgr = user.role !== 'kitchen'
@@ -15,6 +22,7 @@ export function ManagerDashboard() {
   const alerts = useFetch<any[]>('/alerts')
   const reqs = useFetch<any[]>('/surplus/requests/all?status=pending')
   const part = useFetch<any[]>(isMgr ? '/bookings/participation?days=30' : null)
+  const rec = useFetch<any>(isMgr ? '/waste/recommendations' : null)
   return (
     <div>
       <PageHeader title="Operations dashboard" sub="Live view across bookings, predictions, waste and redistribution." />
@@ -27,6 +35,7 @@ export function ManagerDashboard() {
         <Card title="Waste rate trend (last 30 days)"><Async f={waste}>{(w) => w.series.length ? <ResponsiveContainer width="100%" height={240}><LineChart data={w.series} {...chartProps}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="period" tick={{ fontSize: 11 }} /><YAxis unit="%" tick={{ fontSize: 11 }} /><Tooltip /><Line dataKey="waste_pct" name="Waste %" stroke="#059669" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer> : <Empty>No waste records in this period.</Empty>}</Async></Card>
         <Card title="Next meals - predicted demand" action={<Link to="/prediction" className="text-xs text-brand-700">Details</Link>}><Async f={pred}>{(p) => <Table rows={p.slice(0, 8)} empty="No upcoming meals." cols={[{ h: 'Meal', r: (r) => `${fmtDate(r.date)} · ${cap(r.meal_type)}` }, { h: 'Booked', r: (r) => r.active_bookings, cls: 'text-right' }, { h: 'Predicted', r: (r) => <b>{r.predicted_attendance}</b>, cls: 'text-right' }, { h: 'Range', r: (r) => `${r.lower}-${r.upper}`, cls: 'text-right' }, { h: 'Confidence', r: (r) => <Status s={r.confidence} /> }]} />}</Async></Card>
         <Card title="Top alerts"><Async f={alerts}>{(a) => a.length ? <ul className="space-y-3">{a.slice(0, 4).map((x) => <li key={x.id} className="flex gap-2 text-sm"><Status s={x.severity} /><div><div className="font-medium">{x.title}</div><div className="text-xs text-slate-500">{x.what}</div></div></li>)}</ul> : <Empty>No open alerts. Generate alerts from the Smart alerts page.</Empty>}</Async></Card>
+        {isMgr && <Card title="What to cook next" action={<Link className="text-xs text-brand-700" to="/recommendations">See all suggestions</Link>}><Async f={rec}>{(d) => <RecommendationList rows={d.recommendations.slice(0, 3)} />}</Async></Card>}
         {isMgr && <Card title="Bookings vs attendance (30 d, recorded meals)"><Async f={part}>{(rows) => <Table rows={rows} empty="No attendance recorded yet." cols={[{ h: 'Meal', r: (r) => cap(r.meal_type) }, { h: 'Avg booked', r: (r) => r.avg_active_bookings, cls: 'text-right' }, { h: 'Avg attended', r: (r) => r.avg_attendance, cls: 'text-right' }, { h: 'Attendance per booking', r: (r) => r.attendance_per_booking, cls: 'text-right' }]} />}</Async></Card>}
       </div>
     </div>
@@ -34,14 +43,10 @@ export function ManagerDashboard() {
 }
 
 export function Prediction() {
-  const { user } = useAuth(); const isMgr = user.role !== 'kitchen'
   const [days, setDays] = useState(3); const [open, setOpen] = useState<number | null>(null)
   const pred = useFetch<any[]>(`/predict/upcoming?days=${days}`)
-  const model = useFetch<any>('/predict/model')
-  const hist = useFetch<any>(isMgr ? '/predict/history' : null)
   const { run, busy } = useAction()
-  const save = () => run(async () => { await api('/predict/run', { body: { days } }); hist.reload() }, 'Predictions saved and team notified')
-  const retrain = () => run(async () => { await api('/predict/retrain', { method: 'POST' }); model.reload(); pred.reload() }, 'Model retrained')
+  const save = () => run(async () => { await api('/predict/run', { body: { days } }); pred.reload() }, 'Preparation estimates saved and team notified')
   return (
     <div>
       <PageHeader title="Demand prediction" sub="Expected attendance and recommended preparation quantities, combining bookings, history and the calendar." action={<div className="flex gap-2"><Select value={days} onChange={(e: any) => setDays(+e.target.value)} className="w-36">{[1, 2, 3, 5, 7].map((d) => <option key={d} value={d}>Next {d} day{d > 1 ? 's' : ''}</option>)}</Select><Btn loading={busy} onClick={save}>Save & notify team</Btn></div>} />
@@ -51,18 +56,18 @@ export function Prediction() {
             {open === r.schedule_id && <tr><td colSpan={7} className="bg-slate-50"><Table rows={r.dishes} cols={[{ h: 'Dish', r: (d) => d.name }, { h: 'Recommended (kg)', r: (d) => <b>{d.recommended_kg}</b>, cls: 'text-right' }, { h: 'Range (kg)', r: (d) => `${d.lower_kg}-${d.upper_kg}`, cls: 'text-right' }, { h: 'Uptake', r: (d) => d.uptake_source === 'history' ? `${Math.round(d.uptake * 100)}% (n=${d.uptake_n})` : <Badge tone="amber">default assumption</Badge> }, { h: 'Prepared (kg)', r: (d) => num(d.prepared_kg), cls: 'text-right' }, { h: 'Check', r: (d) => d.status ? <Status s={d.status} /> : '-' }]} />
               <p className="px-3 pb-2 text-xs text-slate-500">Recommended = predicted attendance × portion × historical uptake × (1 + buffer). Historical bookings-to-attendance ratio: {r.historical_attendance_per_booking} attendees per booking, so unbooked attendance is included.</p></td></tr>}</Fragment>)}</tbody></table></div> : <Empty>No meals scheduled in this window.</Empty>}</Async>
       </Card>
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Card title="Model" action={isMgr && <Btn size="sm" variant="secondary" loading={busy} onClick={retrain}>Retrain now</Btn>}>
-          <Async f={model}>{(m) => <div className="space-y-3 text-sm"><div className="flex flex-wrap items-center gap-2"><b>{cap(m.algorithm)}</b><DemoNote m={m} /></div><p className="text-xs text-slate-500">{m.data_label}</p>
-            {m.metrics?.test ? <><div className="grid grid-cols-3 gap-3"><Stat label="MAE" value={m.metrics.test.mae} sub="students" /><Stat label="RMSE" value={m.metrics.test.rmse} sub="students" /><Stat label="R²" value={m.metrics.test.r2} /></div>
-              <p className="text-xs text-slate-500">Held-out test, {m.metrics.split}. {m.n_train} training / {m.n_test} test meals. {m.metrics.note}</p>
-              <Table rows={Object.entries(m.metrics.candidates).map(([k, v]: any) => ({ id: k, k, ...v }))} cols={[{ h: 'Candidate', r: (r) => <span className={r.k === m.metrics.selected ? 'font-semibold text-brand-700' : ''}>{cap(r.k)}</span> }, { h: 'CV RMSE', r: (r) => r.cv_rmse, cls: 'text-right' }, { h: 'Test MAE', r: (r) => r.test.mae, cls: 'text-right' }, { h: 'Test R²', r: (r) => r.test.r2, cls: 'text-right' }]} /></> : <p className="text-amber-700">{m.metrics?.note}</p>}</div>}</Async>
-        </Card>
-        <Card title="Held-out back-test: predicted vs actual attendance"><Async f={model}>{(m) => m.metrics?.backtest?.length ? <ResponsiveContainer width="100%" height={260}><LineChart data={m.metrics.backtest.filter((b: any) => b.meal_type === 'lunch')} {...chartProps}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="date" tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Line dataKey="actual" stroke="#0f172a" dot={false} name="Actual (lunch)" /><Line dataKey="predicted" stroke="#059669" dot={false} name="Predicted" /></LineChart></ResponsiveContainer> : <Empty>Not enough history for a back-test yet.</Empty>}</Async></Card>
-      </div>
-      {isMgr && <Card className="mt-6" title="Saved predictions vs actual attendance"><Async f={hist}>{(h) => <><p className="mb-3 text-sm text-slate-500">{h.compared ? `Mean absolute error on ${h.compared} stored predictions with recorded attendance: ${h.mae_on_stored_predictions} students.` : 'Compared once attendance is recorded for predicted meals.'}</p><Table rows={h.rows.slice(0, 15)} cols={[{ h: 'Meal', r: (r) => `${fmtDate(r.date)} · ${cap(r.meal_type)}` }, { h: 'Booked', r: (r) => r.active_bookings, cls: 'text-right' }, { h: 'Predicted', r: (r) => r.predicted, cls: 'text-right' }, { h: 'Actual', r: (r) => r.actual ?? '-', cls: 'text-right' }]} /></>}</Async></Card>}
     </div>
   )
+}
+
+export function CookRecommendations() {
+  const data = useFetch<any>('/waste/recommendations')
+  return <div>
+    <PageHeader title="What to cook" sub="Simple suggestions from food left over in the last 30 days. Check tomorrow’s menu before changing quantities." />
+    <Card title="Suggestions to reduce leftovers"><Async f={data}>{(d) => <RecommendationList rows={d.recommendations} />}</Async>
+      <p className="mt-3 text-xs text-slate-500">These are estimates from recorded meals, not guarantees. Change the menu or quantity only after checking attendance and food needs.</p>
+    </Card>
+  </div>
 }
 
 export function Preparation() {
@@ -113,7 +118,7 @@ export function WasteAnalytics() {
   const [start, setStart] = useState(iso(addDays(new Date(), -29))); const [end, setEnd] = useState(iso(new Date())); const [group, setGroup] = useState('day')
   const q = `start=${start}&end=${end}`
   const sum = useFetch<any>(`/waste/summary?${q}&group=${group}`); const dish = useFetch<any[]>(`/waste/by-dish?${q}`); const meal = useFetch<any[]>(`/waste/by-meal?${q}`)
-  const pat = useFetch<any>(isMgr ? '/waste/patterns' : null); const img = useFetch<any[]>('/waste/image-breakdown')
+  const rec = useFetch<any>(isMgr ? `/waste/recommendations?${q}` : null)
   return (
     <div>
       <PageHeader title="Food waste analytics" sub="Computed from kitchen records: prepared, consumed and leftover quantities." action={isMgr && <Btn variant="secondary" onClick={() => download(`/waste/export.csv?${q}`, 'waste_report.csv')}>Export CSV</Btn>} />
@@ -122,10 +127,8 @@ export function WasteAnalytics() {
         <Card title="Prepared vs consumed vs leftover" className="mb-6">{s.series.length ? <ResponsiveContainer width="100%" height={280}><BarChart data={s.series} {...chartProps}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="period" tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Bar dataKey="consumed" stackId="a" fill="#10b981" name="Consumed kg" /><Bar dataKey="leftover" stackId="a" fill="#f59e0b" name="Leftover kg" /></BarChart></ResponsiveContainer> : <Empty>No records in this range.</Empty>}</Card></> }}</Async>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="By dish (most leftover first)"><Async f={dish}>{(rows) => <Table rows={rows.slice(0, 12)} cols={[{ h: 'Dish', r: (r) => r.item }, { h: 'Prepared', r: (r) => num(r.prepared), cls: 'text-right' }, { h: 'Leftover', r: (r) => num(r.leftover), cls: 'text-right' }, { h: 'Waste %', r: (r) => <Badge tone={r.waste_pct > 20 ? 'red' : r.waste_pct > 10 ? 'amber' : 'green'}>{num(r.waste_pct)}%</Badge>, cls: 'text-right' }, { h: 'Loss', r: (r) => num(r.loss, 0), cls: 'text-right' }]} />}</Async></Card>
-        <Card title="By meal"><Async f={meal}>{(rows) => <Table rows={rows} cols={[{ h: 'Meal', r: (r) => cap(r.meal_type) }, { h: 'Prepared', r: (r) => num(r.prepared), cls: 'text-right' }, { h: 'Leftover', r: (r) => num(r.leftover), cls: 'text-right' }, { h: 'Waste %', r: (r) => `${num(r.waste_pct)}%`, cls: 'text-right' }]} />}</Async>
-          {img.data?.length ? <div className="mt-4"><div className="label">Confirmed image observations by type</div><div className="flex flex-wrap gap-2">{img.data.map((i: any) => <Badge key={i.label}>{cap(i.label)}: {i.count}</Badge>)}</div></div> : null}</Card>
-        {isMgr && <Card title="Patterns & recommendations" className="lg:col-span-2"><Async f={pat}>{(p) => <div className="grid gap-6 md:grid-cols-2"><div>{p.recommendations.length ? <ul className="list-disc space-y-2 pl-5 text-sm">{p.recommendations.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul> : <Empty>No recurring patterns detected yet.</Empty>}</div>
-          <div>{p.weekday.length ? <ResponsiveContainer width="100%" height={220}><BarChart data={p.weekday} {...chartProps}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="weekday" tick={{ fontSize: 10 }} /><YAxis unit="%" tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="waste_pct" fill="#059669" name="Waste %" /></BarChart></ResponsiveContainer> : null}</div></div>}</Async></Card>}
+        <Card title="By meal"><Async f={meal}>{(rows) => <Table rows={rows} cols={[{ h: 'Meal', r: (r) => cap(r.meal_type) }, { h: 'Prepared', r: (r) => num(r.prepared), cls: 'text-right' }, { h: 'Leftover', r: (r) => num(r.leftover), cls: 'text-right' }, { h: 'Waste %', r: (r) => `${num(r.waste_pct)}%`, cls: 'text-right' }]} />}</Async></Card>
+        {isMgr && <Card title="What should I change?" className="lg:col-span-2"><Async f={rec}>{(d) => <RecommendationList rows={d.recommendations} />}</Async></Card>}
       </div>
     </div>
   )
