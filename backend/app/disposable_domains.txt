@@ -1,0 +1,32 @@
+# Disposable / temporary email domain blocklist for Shakambari AI
+# Add one domain per line (lowercase). Comments and empty lines are ignored.
+mailinator.com
+guerrillamail.com
+guerrillamail.net
+guerrillamail.biz
+guerrillamail.org
+10minutemail.com
+10minutemail.net
+tempmail.com
+tempmail.net
+temp-mail.org
+yopmail.com
+yopmail.fr
+yopmail.net
+trashmail.com
+trashmail.net
+sharklasers.com
+getairmail.com
+dispostable.com
+throwawaymail.com
+mohmal.com
+nada.ltd
+inboxkitten.com
+fakemailgenerator.com
+generator.email
+burnermail.io
+crazymailing.com
+tempinbox.com
+dropmail.me
+mytemp.email
+emailondeck.com

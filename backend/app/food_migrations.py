@@ -65,7 +65,7 @@ def _install_sqlite_triggers(connection, tables):
         """))
         connection.execute(text("""
             CREATE TRIGGER IF NOT EXISTS ck_schedule_dishes_vegetarian_update
-            BEFORE UPDATE ON schedule_dishes
+            BEFORE UPDATE OF menu_item_id ON schedule_dishes
             WHEN NOT EXISTS (
                 SELECT 1 FROM menu_items mi
                 WHERE mi.id = NEW.menu_item_id AND mi.is_active = 1 AND mi.diet IN ('veg', 'vegan')
@@ -173,6 +173,50 @@ def _install_postgres_triggers(connection, tables):
             BEFORE INSERT OR UPDATE ON surplus_listings
             FOR EACH ROW EXECUTE FUNCTION enforce_lacto_vegetarian_surplus()
         """))
+
+
+def _apply_auth_and_schema_migrations(connection, tables):
+    is_sqlite = connection.dialect.name == "sqlite"
+    dt_type = "DATETIME" if is_sqlite else "TIMESTAMP WITHOUT TIME ZONE"
+
+    if "users" in tables:
+        _add_column(connection, "users", "email_verified", "BOOLEAN DEFAULT 0" if is_sqlite else "BOOLEAN DEFAULT FALSE NOT NULL")
+        _add_column(connection, "users", "email_verified_at", dt_type)
+        _add_column(connection, "users", "token_version", "INTEGER DEFAULT 1")
+        _add_column(connection, "users", "failed_login_attempts", "INTEGER DEFAULT 0")
+        _add_column(connection, "users", "locked_until", dt_type)
+        connection.execute(text("UPDATE users SET email_verified = 1 WHERE email_verified IS NULL OR email_verified = 0" if is_sqlite else "UPDATE users SET email_verified = TRUE WHERE email_verified IS NULL OR email_verified = FALSE"))
+
+    if "ngo_partners" in tables:
+        _add_column(connection, "ngo_partners", "document_url", "VARCHAR(500)")
+        _add_column(connection, "ngo_partners", "approval_note", "VARCHAR(500)")
+
+    if "redistribution_requests" in tables:
+        _add_column(connection, "redistribution_requests", "handover_code_hash", "VARCHAR(128)")
+        _add_column(connection, "redistribution_requests", "handover_code_enc", "VARCHAR(256)")
+
+    if "image_observations" in tables:
+        _add_column(connection, "image_observations", "provider", "VARCHAR(40) DEFAULT 'heuristic'")
+        _add_column(connection, "image_observations", "model_name", "VARCHAR(80) DEFAULT 'color-heuristic-v1'")
+
+    if "alerts" in tables:
+        _add_column(connection, "alerts", "fingerprint", "VARCHAR(120)")
+        _add_column(connection, "alerts", "updated_at", dt_type)
+        _add_column(connection, "alerts", "resolved_at", dt_type)
+
+    if "notifications" in tables:
+        _add_column(connection, "notifications", "dedup_key", "VARCHAR(120)")
+
+    from .models import EmailOTP, ModelBlob
+    EmailOTP.__table__.create(connection, checkfirst=True)
+    ModelBlob.__table__.create(connection, checkfirst=True)
+
+    try:
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_bookings_student_schedule ON bookings (student_id, schedule_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications (user_id, is_read)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_alerts_fingerprint ON alerts (fingerprint)"))
+    except Exception:
+        pass
 
 
 def apply_food_policy_migrations(engine):
@@ -287,3 +331,5 @@ def apply_food_policy_migrations(engine):
                         CHECK (status <> 'eligible' OR (diet IS NOT NULL AND diet IN ('veg', 'vegan')))
                     """))
             _install_postgres_triggers(connection, tables)
+
+        _apply_auth_and_schema_migrations(connection, tables)

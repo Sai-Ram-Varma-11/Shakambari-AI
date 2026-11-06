@@ -49,10 +49,17 @@ def audit(db, user, action, entity=None, entity_id=None, detail=None):
                     detail=(detail or "")[:500]))
 
 
-def notify(db, user_ids, title, body="", link=None):
+def notify(db, user_ids, title, body="", link=None, dedup_key=None):
     from .models import Notification
     for uid in set(user_ids):
-        db.add(Notification(user_id=uid, title=title[:200], body=body[:500], link=link))
+        if dedup_key:
+            user_dedup = f"{dedup_key}:{uid}"
+            exists = db.query(Notification).filter_by(user_id=uid, dedup_key=user_dedup).first()
+            if exists:
+                continue
+            db.add(Notification(user_id=uid, title=title[:200], body=body[:500], link=link, dedup_key=user_dedup))
+        else:
+            db.add(Notification(user_id=uid, title=title[:200], body=body[:500], link=link))
 
 
 def staff_ids(db, inst_id, roles=("mess_admin",)):

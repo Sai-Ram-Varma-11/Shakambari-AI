@@ -28,7 +28,8 @@ def build(db, inst_id, start: date, end: date):
     loss = float(df["loss"].sum()) if not df.empty else 0.0
     col = (db.query(CollectionRecord, SurplusListing).join(RedistributionRequest, RedistributionRequest.id == CollectionRecord.request_id)
            .join(SurplusListing, SurplusListing.id == RedistributionRequest.listing_id)
-           .filter(SurplusListing.institution_id == inst_id, func.date(CollectionRecord.collected_at) >= str(start), func.date(CollectionRecord.collected_at) <= str(end)).all())
+           .filter(SurplusListing.institution_id == inst_id, RedistributionRequest.status.in_(("picked_up", "delivered")),
+                   func.date(CollectionRecord.collected_at) >= str(start), func.date(CollectionRecord.collected_at) <= str(end)).all())
     ckg = sum(x.collected_kg for x, _ in col)
     cportions = sum(x.portions or 0 for x, _ in col)
     costs = {i: v for i, v in db.query(MenuItem.id, MenuItem.cost_per_kg).filter_by(institution_id=inst_id)}

@@ -30,7 +30,7 @@ def call(client):
     return _call
 
 
-MGR, KIT, NGO, ADM = "manager@platesense.demo", "kitchen@platesense.demo", "ngo@platesense.demo", "superadmin@platesense.demo"
+MGR, KIT, NGO, ADM = "manager@shakambari.demo", "kitchen@shakambari.demo", "ngo@shakambari.demo", "superadmin@shakambari.demo"
 
 
 # ---------------- authentication & authorisation ----------------
@@ -272,8 +272,10 @@ def test_surplus_workflow_and_sustainability(call, db):
     assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "picked_up", "collected_kg": 2}).status_code == 409  # not approved yet
     assert call("post", f"/surplus/requests/{rid}/decision", who=NGO, json={"approve": True}).status_code == 403
     assert call("post", f"/surplus/requests/{rid}/decision", who=MGR, json={"approve": True, "pickup_time": (n + timedelta(hours=2)).isoformat()}).json()["status"] == "approved"
-    assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "picked_up", "collected_kg": 9}).status_code == 422
-    assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "picked_up", "collected_kg": 2.5, "portions": 12}).status_code == 200
+    assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "delivered", "delivered_to": "Shelter"}).status_code == 409
+    pickup_code = next(r for r in call("get", "/surplus/requests/all", who=NGO).json() if r["id"] == rid)["pickup_code"]
+    assert call("post", f"/surplus/requests/{rid}/handover", who=KIT, json={"code": pickup_code, "collected_kg": 9, "portions": 12}).status_code == 422
+    assert call("post", f"/surplus/requests/{rid}/handover", who=KIT, json={"code": pickup_code, "collected_kg": 2.5, "portions": 12}).json()["status"] == "picked_up"
     assert call("post", f"/surplus/requests/{rid}/status", who=NGO, json={"status": "delivered", "delivered_to": "Shelter"}).json()["status"] == "delivered"
     assert any(h["food_name"] == "Rice" for h in call("get", "/surplus/donations/history", who=NGO).json())
     m = metric()

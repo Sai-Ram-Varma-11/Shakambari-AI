@@ -89,6 +89,35 @@ export function Register() {
         </>}
         <Btn type="submit" loading={busy} className="w-full">Register</Btn>
         <p className="text-center text-sm text-slate-500">Already registered? <Link className="text-brand-700" to="/login">Log in</Link></p>
+        <p className="text-center text-sm text-slate-500">Registering a mess? <Link className="text-brand-700" to="/register-mess">Request access</Link></p>
+      </form>
+    </AuthFrame>
+  )
+}
+
+export function RegisterMess() {
+  const { run, busy } = useAction()
+  const [submitted, setSubmitted] = useState(false)
+  const [form, setForm] = useState<any>({})
+  const set = (key: string) => (e: any) => setForm({ ...form, [key]: e.target.value })
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    const result = await run(() => api('/auth/institution-requests', { body: { ...form, phone: form.phone || null, message: form.message || null } }))
+    if (result) setSubmitted(true)
+  }
+  if (submitted) return <AuthFrame title="Request submitted" sub="Your mess registration is waiting for superadmin approval. You can log in after it is approved."><Link className="btn-primary w-full" to="/login">Go to login</Link></AuthFrame>
+  return (
+    <AuthFrame title="Register a mess" sub="Send your mess details for review. Approval creates your mess account and manager access.">
+      <form onSubmit={submit} className="space-y-3">
+        <Field label="Mess name"><Input required minLength={2} value={form.name || ''} onChange={set('name')} /></Field>
+        <Field label="Mess code" hint="A short unique code, using letters, numbers, hyphens or underscores"><Input required minLength={2} maxLength={40} value={form.code || ''} onChange={set('code')} /></Field>
+        <Field label="Your name"><Input required minLength={2} value={form.requester_name || ''} onChange={set('requester_name')} /></Field>
+        <Field label="Email"><Input type="email" required value={form.email || ''} onChange={set('email')} /></Field>
+        <Field label="Password" hint="At least 8 characters with a letter and a number"><Input type="password" required minLength={8} autoComplete="new-password" value={form.password || ''} onChange={set('password')} /></Field>
+        <Field label="Phone (optional)"><Input value={form.phone || ''} onChange={set('phone')} /></Field>
+        <Field label="Message (optional)"><Input maxLength={500} value={form.message || ''} onChange={set('message')} /></Field>
+        <Btn type="submit" loading={busy} className="w-full">Submit request</Btn>
+        <p className="text-center text-sm text-slate-500">Already approved? <Link className="text-brand-700" to="/login">Log in</Link></p>
       </form>
     </AuthFrame>
   )

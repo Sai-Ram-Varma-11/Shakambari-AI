@@ -1,5 +1,5 @@
 {
-  "name": "platesense-frontend",
+  "name": "shakambari-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -9,7 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/fraunces": "^5.3.0",
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
+    "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.453.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",

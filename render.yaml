@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: platesense-api
+    name: shakambari-api
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
@@ -16,3 +16,21 @@ services:
         sync: false
       - key: TIMEZONE
         value: Asia/Kolkata
+      - key: TRUST_PROXY
+        value: "true"
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: SEED_DEMO_ON_EMPTY
+        value: "true"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM_ADDRESS
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: "Shakambari AI"

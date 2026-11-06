@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, cap, fmtTime, num, useAction, useAuth, useFetch } from '../lib'
+import { api, cap, fmtTime, iso, num, useAction, useAuth, useFetch } from '../lib'
 import { Async, Badge, Btn, Card, Empty, Field, Input, PageHeader, Select, Stat, Status, Table } from '../ui'
 
 export function UsersPage() {
@@ -64,16 +64,29 @@ export function Profile() {
 }
 
 export function AdminPage() {
-  const ov = useFetch<any>('/admin/overview'); const ins = useFetch<any[]>('/admin/institutions'); const audit = useFetch<any[]>('/admin/audit?limit=60'); const { run, busy } = useAction(); const [n, setN] = useState({ name: '', code: '' })
+  const ov = useFetch<any>('/admin/overview'); const ins = useFetch<any[]>('/admin/institutions'); const requests = useFetch<any[]>('/admin/institution-requests'); const audit = useFetch<any[]>('/admin/audit?limit=60'); const { run, busy } = useAction(); const [n, setN] = useState({ name: '', code: '' })
+  const [selectedInstitution, setSelectedInstitution] = useState('')
+  const [reportDate, setReportDate] = useState(iso(new Date()))
+  const daily = useFetch<any>(selectedInstitution ? `/admin/institutions/${selectedInstitution}/daily?on=${reportDate}` : null)
   return (
     <div>
-      <PageHeader title="Platform administration" sub="Cross-institution overview, institutions and recent activity." />
+      <PageHeader title="Platform administration" sub="Review mess registration requests, see registered messes and open daily records." />
       <Async f={ov}>{(o) => <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5"><Stat label="Institutions" value={o.institutions} /><Stat label="Meal schedules" value={num(o.meal_schedules, 0)} /><Stat label="Bookings" value={num(o.bookings, 0)} /><Stat label="Surplus listings" value={o.surplus_listings} /><Stat label="Partners pending" value={o.pending_partners} tone={o.pending_partners ? 'warn' : 'good'} /></div>}</Async>
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card title="Institutions" className="lg:col-span-2"><Async f={ins}>{(rows) => <Table rows={rows} cols={[{ h: 'Name', r: (r) => r.name }, { h: 'Code', r: (r) => r.code }, { h: 'Data', r: (r) => <Badge tone={r.data_mode === 'demo' ? 'amber' : 'green'}>{r.data_mode === 'demo' ? 'Synthetic demo' : 'Real'}</Badge> }, { h: 'Users', r: (r) => r.users }]} />}</Async>
-          <p className="mt-3 text-xs text-slate-500">To act inside another institution, send the X-Institution-Id header via the API; the UI works within your home institution.</p></Card>
+        <Card title="Registered messes" className="lg:col-span-2"><Async f={ins}>{(rows) => <Table rows={rows} cols={[{ h: 'Mess', r: (r) => r.name }, { h: 'Code', r: (r) => r.code }, { h: 'Data', r: (r) => <Badge tone={r.data_mode === 'demo' ? 'amber' : 'green'}>{r.data_mode === 'demo' ? 'Synthetic demo' : 'Real'}</Badge> }, { h: 'Users', r: (r) => r.users }, { h: '', r: (r) => <Btn size="sm" variant="secondary" onClick={() => setSelectedInstitution(String(r.id))}>Daily records</Btn> }]} />}</Async></Card>
         <Card title="Add institution"><div className="space-y-3"><Field label="Name"><Input value={n.name} onChange={(e: any) => setN({ ...n, name: e.target.value })} /></Field><Field label="Code"><Input value={n.code} onChange={(e: any) => setN({ ...n, code: e.target.value })} /></Field><Btn loading={busy} onClick={() => run(async () => { await api('/admin/institutions', { body: n }); setN({ name: '', code: '' }); ins.reload() }, 'Institution created')}>Create</Btn></div></Card>
       </div>
+      <Card title="Mess registration requests" className="mt-6"><Async f={requests}>{(rows) => <Table rows={rows} empty="No registration requests are waiting for review." cols={[
+        { h: 'Mess', r: (r) => <div><b>{r.name}</b><div className="text-xs text-slate-500">Code: {r.code}</div></div> },
+        { h: 'Contact', r: (r) => <div>{r.requester_name}<div className="text-xs text-slate-500">{r.email}{r.phone ? ` · ${r.phone}` : ''}</div></div> },
+        { h: 'Message', r: (r) => r.message || '-' },
+        { h: 'Requested', r: (r) => fmtTime(r.created_at) },
+        { h: 'Status', r: (r) => <Badge tone={r.status === 'pending' ? 'amber' : r.status === 'approved' ? 'green' : 'red'}>{cap(r.status)}</Badge> },
+        { h: '', r: (r) => r.status === 'pending' && <div className="flex gap-1"><Btn size="sm" loading={busy} onClick={() => run(async () => { await api(`/admin/institution-requests/${r.id}/decision`, { method: 'POST', body: { approve: true } }); requests.reload(); ins.reload(); ov.reload() }, 'Mess approved; manager account created')}>Approve</Btn><Btn size="sm" variant="secondary" loading={busy} onClick={() => run(async () => { await api(`/admin/institution-requests/${r.id}/decision`, { method: 'POST', body: { approve: false } }); requests.reload() }, 'Request rejected')}>Reject</Btn></div> },
+      ]} />}</Async></Card>
+      {selectedInstitution && <Card title="Daily mess records" className="mt-6" action={<div className="flex items-end gap-2"><Field label="Date"><Input type="date" value={reportDate} onChange={(e: any) => setReportDate(e.target.value)} /></Field><Btn size="sm" variant="secondary" onClick={() => setSelectedInstitution('')}>Close</Btn></div>}>
+        <Async f={daily}>{(report) => <div><p className="mb-3 text-sm text-slate-500">{report.institution} · {report.date}</p>{report.meals.length ? <div className="space-y-4">{report.meals.map((meal: any) => <div key={meal.schedule_id} className="rounded-lg border border-slate-200 p-3"><div className="mb-2 flex flex-wrap items-center gap-2"><b>{cap(meal.meal_type)}</b><Status s={meal.service_status} /><span className="text-xs text-slate-500">Bookings: {meal.bookings} · Attended: {meal.headcount ?? 'not recorded'}</span></div><Table rows={meal.dishes.map((dish: any, i: number) => ({ id: `${meal.schedule_id}-${i}`, ...dish }))} empty="No kitchen quantities recorded." cols={[{ h: 'Dish', r: (r) => r.dish }, { h: 'Prepared (kg)', r: (r) => r.prepared_kg, cls: 'text-right' }, { h: 'Consumed (kg)', r: (r) => r.consumed_kg ?? '-', cls: 'text-right' }, { h: 'Leftover (kg)', r: (r) => r.leftover_kg, cls: 'text-right' }, { h: 'Edible / inedible (kg)', r: (r) => `${r.edible_kg} / ${r.inedible_kg}`, cls: 'text-right' }]} /></div>)}</div> : <Empty>No meals are scheduled for this date.</Empty>}</div>}</Async>
+      </Card>}
       <Card title="Recent activity (audit log)" className="mt-6"><Async f={audit}>{(rows) => <Table rows={rows} cols={[{ h: 'When', r: (r) => fmtTime(r.created_at) }, { h: 'User', r: (r) => r.user || '-' }, { h: 'Action', r: (r) => r.action }, { h: 'Detail', r: (r) => r.detail || '' }]} />}</Async></Card>
     </div>
   )

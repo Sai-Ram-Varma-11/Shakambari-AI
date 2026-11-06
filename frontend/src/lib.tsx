@@ -2,9 +2,26 @@ import { createContext, useCallback, useContext, useEffect, useState, ReactNode 
 
 const BASE = (import.meta as any).env?.VITE_API_URL || '/api'
 export const tokenStore = {
-  get: () => localStorage.getItem('ps_token'),
-  set: (t: string) => localStorage.setItem('ps_token', t),
-  clear: () => localStorage.removeItem('ps_token'),
+  get: () => {
+    let t = localStorage.getItem('sh_token')
+    if (!t) {
+      const old = localStorage.getItem('ps_token')
+      if (old) {
+        localStorage.setItem('sh_token', old)
+        localStorage.removeItem('ps_token')
+        t = old
+      }
+    }
+    return t
+  },
+  set: (t: string) => {
+    localStorage.setItem('sh_token', t)
+    localStorage.removeItem('ps_token')
+  },
+  clear: () => {
+    localStorage.removeItem('sh_token')
+    localStorage.removeItem('ps_token')
+  },
 }
 
 export async function api<T = any>(path: string, opts: { method?: string; body?: any; form?: FormData; raw?: boolean } = {}): Promise<T> {

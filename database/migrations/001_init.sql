@@ -1,4 +1,4 @@
--- PlateSense AI schema (PostgreSQL). Generated from the SQLAlchemy models.
+-- Shakambari AI schema (PostgreSQL). Generated from the SQLAlchemy models.
 -- NOTE: the application also creates missing tables automatically on startup.
 
 CREATE TABLE audit_logs (

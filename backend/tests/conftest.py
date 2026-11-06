@@ -1,8 +1,8 @@
 import os, pathlib, shutil, tempfile
 
-TMP = pathlib.Path(tempfile.mkdtemp(prefix="platesense-tests-"))
+TMP = pathlib.Path(tempfile.mkdtemp(prefix="shakambari-tests-"))
 os.environ.update(DATABASE_URL=f"sqlite:///{TMP / 'test.db'}", UPLOAD_DIR=str(TMP / "uploads"), MODEL_DIR=str(TMP / "models"),
-                  DEBUG_RETURN_RESET_TOKEN="true", SECRET_KEY="test-secret-key-for-tests-only-0123456789")
+                  DEBUG_RETURN_RESET_TOKEN="true", SECRET_KEY="test-secret-key-for-tests-only-0123456789", LOGIN_OTP_ENABLED="false")
 
 import pytest
 from fastapi.testclient import TestClient

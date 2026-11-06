@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { QRCodeSVG } from 'qrcode.react'
 import { ThumbsDown, ThumbsUp, Star } from 'lucide-react'
 import { addDays, api, cap, fmtDate, fmtTime, iso, num, useAction, useAuth, useFetch, MEALS } from '../lib'
 import { Async, Badge, Btn, Card, Empty, Field, Input, Modal, PageHeader, Select, Stat, Status, Table } from '../ui'
@@ -32,7 +34,7 @@ export function StudentDashboard() {
   const sched = useFetch<any[]>(`/menu/schedules?start=${iso(new Date())}&end=${iso(addDays(new Date(), 1))}`)
   return (
     <div>
-      <PageHeader title={`Hello, ${user.name.split(' ')[0]}`} sub="Book before the cutoff so the kitchen can cook the right amount." />
+      <PageHeader title={`Hello, ${user.name.split(' ')[0]}`} sub="Book before the cutoff so the kitchen can cook the right amount." action={<Link className="btn-primary" to="/book">Open meal calendar</Link>} />
       <Async f={stats}>{(s) => <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4"><Stat label="Meals booked" value={s.booked} /><Stat label="Attended" value={s.attended} /><Stat label="Cancelled" value={s.cancelled} /><Stat label="Show-up rate" value={s.attendance_rate === null ? '-' : `${s.attendance_rate}%`} sub={`${s.no_shows} booked but not attended`} tone={s.no_shows > 5 ? 'warn' : 'good'} /></div>}</Async>
       <Async f={sched}>{(rows) => {
         const days = Array.from(new Set(rows.map((r: any) => r.date)))
@@ -43,17 +45,33 @@ export function StudentDashboard() {
 }
 
 export function BookMeals() {
-  const [start, setStart] = useState(iso(new Date()))
-  const sched = useFetch<any[]>(`/menu/schedules?start=${start}&end=${iso(addDays(new Date(start), 6))}`)
+  const [selectedDate, setSelectedDate] = useState(iso(new Date()))
+  const sched = useFetch<any[]>(`/menu/schedules?start=${selectedDate}&end=${selectedDate}`)
   const prefs = useFetch<any>('/bookings/preferences')
   const { run } = useAction()
   const setPref = (id: number, p: string | null) => run(async () => { await api('/bookings/preferences', { method: 'PUT', body: { menu_item_id: id, preference: p } }); prefs.reload() })
+  const sessions = [
+    { title: 'Morning', meals: ['breakfast'] },
+    { title: 'Afternoon', meals: ['lunch'] },
+    { title: 'Evening', meals: ['snacks', 'dinner'] },
+  ]
   return (
     <div>
-      <PageHeader title="Book meals" sub="Bookings and cancellations help predict demand. Like or dislike dishes to share your preferences." action={<div className="flex items-center gap-2"><Btn variant="secondary" size="sm" onClick={() => setStart(iso(addDays(new Date(start), -7)))}>Previous week</Btn><Input type="date" value={start} onChange={(e: any) => setStart(e.target.value)} className="w-40" /><Btn variant="secondary" size="sm" onClick={() => setStart(iso(addDays(new Date(start), 7)))}>Next week</Btn></div>} />
+      <PageHeader title="Book meals" sub="Choose a date to see its meal menu. Each meal has its own booking cutoff; book or cancel before the time shown." action={<div className="flex items-center gap-2"><Btn variant="secondary" size="sm" onClick={() => setSelectedDate(iso(addDays(new Date(selectedDate), -1)))}>Previous day</Btn><Input aria-label="Choose meal date" type="date" value={selectedDate} onChange={(e: any) => setSelectedDate(e.target.value)} className="w-40" /><Btn variant="secondary" size="sm" onClick={() => setSelectedDate(iso(addDays(new Date(selectedDate), 1)))}>Next day</Btn></div>} />
       <Async f={sched}>{(rows) => {
-        const days = Array.from(new Set(rows.map((r: any) => r.date)))
-        return days.length ? <>{days.map((d: any) => <div key={d} className="mb-6"><h2 className="mb-2 text-sm font-semibold text-slate-700">{fmtDate(d)}</h2><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{MEALS.map((m) => rows.find((r: any) => r.date === d && r.meal_type === m)).filter(Boolean).map((s: any) => <MealCard key={s.id} s={s} prefs={prefs.data || {}} onPref={setPref} reload={sched.reload} />)}</div></div>)}</> : <Empty>No meals published for this week.</Empty>
+        const byMeal = new Map(rows.map((row: any) => [row.meal_type, row]))
+        return <div>
+          <h2 className="mb-4 text-sm font-semibold text-slate-700">{fmtDate(selectedDate)}</h2>
+          {sessions.map((session) => {
+            const meals = session.meals.map((meal) => byMeal.get(meal)).filter(Boolean)
+            return <section key={session.title} className="mb-6">
+              <h3 className="mb-2 text-sm font-semibold text-slate-600">{session.title}</h3>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {meals.length ? meals.map((s: any) => <MealCard key={s.id} s={s} prefs={prefs.data || {}} onPref={setPref} reload={sched.reload} />) : <p className="text-sm text-slate-400">No meal menu published for this session.</p>}
+              </div>
+            </section>
+          })}
+        </div>
       }}</Async>
     </div>
   )
@@ -62,16 +80,25 @@ export function BookMeals() {
 export function MealHistory() {
   const h = useFetch<any[]>('/bookings/mine?limit=100')
   const [rate, setRate] = useState<any>(null); const [stars, setStars] = useState(4); const [comment, setComment] = useState('')
+  const [mealPass, setMealPass] = useState<any>(null)
   const { run, busy } = useAction()
   const submit = async () => { const r = await run(() => api('/bookings/rate', { body: { menu_item_id: rate.dish.id, schedule_id: rate.sid, rating: stars, comment: comment || null } }), 'Thanks for your feedback'); if (r) { setRate(null); setComment(''); h.reload() } }
+  const showPass = async (scheduleId: number) => {
+    const result = await run(() => api(`/bookings/${scheduleId}/pass`))
+    if (result) setMealPass(result)
+  }
   return (
     <div>
       <PageHeader title="Meal history" sub="Your bookings and attendance. Rate dishes from meals you attended." />
       <Card><Async f={h}>{(rows) => <Table rows={rows} empty="No bookings yet." cols={[
         { h: 'Date', r: (r) => fmtDate(r.date) }, { h: 'Meal', r: (r) => cap(r.meal_type) }, { h: 'Booking', r: (r) => <Status s={r.status} /> },
         { h: 'Attended', r: (r) => (r.attended ? <Badge tone="green">Yes</Badge> : <span className="text-slate-400">No</span>) },
+        { h: 'Meal pass', r: (r) => r.status === 'booked' ? <Btn size="sm" variant="secondary" onClick={() => showPass(r.schedule_id)}>Show QR</Btn> : <span className="text-slate-300">-</span> },
         { h: 'Rate dishes', r: (r) => r.attended ? <div className="flex flex-wrap gap-1">{r.dishes.map((d: any) => d.rated ? <Badge key={d.id}>{d.name} ✓</Badge> : <Btn key={d.id} size="sm" variant="secondary" onClick={() => setRate({ sid: r.schedule_id, dish: d })}><Star className="h-3 w-3" />{d.name}</Btn>)}</div> : <span className="text-slate-300">-</span> },
       ]} />}</Async></Card>
+      <Modal open={!!mealPass} onClose={() => setMealPass(null)} title="Your meal pass">
+        {mealPass && <div className="flex flex-col items-center gap-3 text-center"><p className="text-sm text-slate-600">{fmtDate(mealPass.date)} · {cap(mealPass.meal_type)}</p><QRCodeSVG value={mealPass.pass_token} size={220} includeMargin /><p className="text-xs text-slate-500">Show this QR code to mess staff when you arrive. It expires {fmtTime(mealPass.expires_at)}.</p></div>}
+      </Modal>
       <Modal open={!!rate} onClose={() => setRate(null)} title={`Rate ${rate?.dish.name}`}>
         <div className="space-y-3"><Field label="Rating"><Select value={stars} onChange={(e: any) => setStars(+e.target.value)}>{[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} - {['', 'Poor', 'Fair', 'Good', 'Very good', 'Excellent'][n]}</option>)}</Select></Field>
           <Field label="Comment (optional)"><Input maxLength={500} value={comment} onChange={(e: any) => setComment(e.target.value)} /></Field><Btn loading={busy} onClick={submit}>Submit</Btn></div>

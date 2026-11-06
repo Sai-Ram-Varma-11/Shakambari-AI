@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#FBF7EE"/>
+  <circle cx="1020" cy="120" r="260" fill="#ECF3E8"/>
+  <circle cx="1100" cy="560" r="180" fill="#FDE9B8" opacity=".6"/>
+  <g transform="translate(90 90) scale(3)"><rect width="64" height="64" rx="14" fill="#FBF7EE"/>
+  <path d="M15 22c-3-3 3-5 0-9M49 22c3-3-3-5 0-9" fill="none" stroke="#F59E0B" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M10 36h44c0 11-9 19-22 19S10 47 10 36z" fill="#14532D"/>
+  <ellipse cx="32" cy="36" rx="22" ry="4.2" fill="#F59E0B"/>
+  <ellipse cx="32" cy="36" rx="17" ry="2.2" fill="#FBF7EE" opacity=".35"/>
+  <path d="M32 34V25" stroke="#14532D" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M32 27C25 28 19 23 17 14c8-1 14 4 15 13z" fill="#14532D"/>
+  <path d="M32 27c7 1 13-4 15-13-8-1-14 4-15 13z" fill="#15803D"/></g>
+  <text x="90" y="400" font-family="Georgia, 'Times New Roman', serif" font-size="92" font-weight="700" fill="#14532D">Shakambari AI</text>
+  <text x="90" y="470" font-family="Helvetica, Arial, sans-serif" font-size="38" fill="#1C2A1F">Think Smart. Serve Right. Waste Less.</text>
+  <text x="90" y="530" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="#5B6B5E">Dining-hall food waste reduction and surplus redistribution</text>
+</svg>

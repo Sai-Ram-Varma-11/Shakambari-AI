@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import (JSON, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String,
+from sqlalchemy import (JSON, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String,
                         Text, UniqueConstraint)
 
 from .db import Base
@@ -24,6 +24,23 @@ class Institution(Base):
     created_at = Column(DateTime, default=now)
 
 
+class InstitutionRequest(Base):
+    __tablename__ = "institution_requests"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    code = Column(String(40), nullable=False)
+    requester_name = Column(String(120), nullable=False)
+    email = Column(String(254), nullable=False, index=True)
+    password_hash = Column(String(300), nullable=False)
+    phone = Column(String(30))
+    message = Column(String(500))
+    status = Column(String(20), default="pending", nullable=False, index=True)
+    institution_id = fk("institutions.id", nullable=True, ondelete="SET NULL")
+    reviewed_by = Column(Integer)
+    created_at = Column(DateTime, default=now, nullable=False)
+    reviewed_at = Column(DateTime)
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
@@ -35,8 +52,37 @@ class User(Base):
     phone = Column(String(30))
     is_active = Column(Boolean, default=True, nullable=False)
     is_approved = Column(Boolean, default=True, nullable=False)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    email_verified_at = Column(DateTime)
+    token_version = Column(Integer, default=1, nullable=False)
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime)
     created_at = Column(DateTime, default=now)
     last_login = Column(DateTime)
+
+
+class EmailOTP(Base):
+    __tablename__ = "email_otps"
+    __table_args__ = (Index("ix_email_otps_lookup", "email", "purpose", "created_at"),)
+    id = Column(Integer, primary_key=True)
+    email = Column(String(254), nullable=False, index=True)
+    purpose = Column(String(20), nullable=False)  # 'signup' | 'login' | 'reset'
+    code_hash = Column(String(128), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=5, nullable=False)
+    consumed_at = Column(DateTime)
+    created_at = Column(DateTime, default=now)
+    ip = Column(String(45))
+
+
+class ModelBlob(Base):
+    __tablename__ = "model_blobs"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), unique=True, nullable=False, index=True)
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now)
 
 
 class StudentProfile(Base):
@@ -53,6 +99,8 @@ class NGOPartner(Base):
     org_name = Column(String(200), nullable=False)
     registration_no = Column(String(80))  # self-declared, NOT verified by the system
     address = Column(String(300))
+    document_url = Column(String(500))
+    approval_note = Column(String(500))
     verified = Column(Boolean, default=False, nullable=False)
     verified_by = Column(Integer)
     verified_at = Column(DateTime)
@@ -100,7 +148,7 @@ class ScheduleDish(Base):
 
 class Booking(Base):
     __tablename__ = "bookings"
-    __table_args__ = (UniqueConstraint("schedule_id", "student_id"),)
+    __table_args__ = (UniqueConstraint("schedule_id", "student_id"), Index("ix_bookings_student_schedule", "student_id", "schedule_id"))
     id = Column(Integer, primary_key=True)
     schedule_id = fk("meal_schedules.id", nullable=False, index=True)
     student_id = fk("users.id", nullable=False, index=True)
@@ -231,6 +279,8 @@ class RedistributionRequest(Base):
     status = Column(String(12), default="pending")  # pending|approved|rejected|picked_up|delivered|cancelled
     pickup_time = Column(DateTime)
     message = Column(String(300))
+    handover_code_hash = Column(String(128))
+    handover_code_enc = Column(String(256))
     decided_by = Column(Integer)
     created_at = Column(DateTime, default=now)
     updated_at = Column(DateTime, default=now)
@@ -301,6 +351,8 @@ class ImageObservation(Base):
     confidence = Column(Float)
     scores = Column(JSON, default=dict)
     corrected_label = Column(String(40))
+    provider = Column(String(40), default="heuristic")
+    model_name = Column(String(80), default="color-heuristic-v1")
     quantity_kg = Column(Float)
     status = Column(String(12), default="pending")  # pending|confirmed
     created_by = Column(Integer)
@@ -318,17 +370,22 @@ class Alert(Base):
     evidence = Column(Text)
     why = Column(Text)
     action = Column(Text)
+    fingerprint = Column(String(120), index=True)
     is_resolved = Column(Boolean, default=False)
     created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now)
+    resolved_at = Column(DateTime)
 
 
 class Notification(Base):
     __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notifications_user_read", "user_id", "is_read"),)
     id = Column(Integer, primary_key=True)
     user_id = fk("users.id", nullable=False, index=True)
     title = Column(String(200), nullable=False)
     body = Column(String(500))
     link = Column(String(120))
+    dedup_key = Column(String(120), index=True)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=now)
 

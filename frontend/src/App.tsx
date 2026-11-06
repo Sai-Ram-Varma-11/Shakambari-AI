@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, Bell, BookOpen, Bot, Camera, ChefHat, ClipboardList, Gauge, HeartHandshake, History, Home, Leaf, LogOut, Menu as MenuIcon, Settings, Sparkles, Trash2, UserCog, Users, Utensils, Warehouse } from 'lucide-react'
+import { Activity, Bell, BookOpen, ChefHat, Gauge, HeartHandshake, History, Home, LogOut, Menu as MenuIcon, Settings, Trash2, UserCog, Users, Utensils } from 'lucide-react'
 import { api, fmtTime, useAuth, useFetch } from './lib'
 import { DemoBanner, Loading } from './ui'
-import { Forgot, Landing, Login, Register } from './pages/Public'
+import { Forgot, Landing, Login, Register, RegisterMess } from './pages/Public'
 import { BookMeals, MealHistory, StudentDashboard } from './pages/Student'
-import { ManagerDashboard, MenuManagement, MenuOptimisation, Prediction, Preparation, WasteAnalytics } from './pages/Manager'
-import { Alerts, Partner, Surplus, Sustainability, Vision } from './pages/Ops'
+import { CookingAdvice, ManagerDashboard, MenuManagement, Prediction, Preparation, WasteAnalytics } from './pages/Manager'
+import { Alerts, Partner, Surplus } from './pages/Ops'
 import { AdminPage, InstitutionSettings, Profile, UsersPage } from './pages/Admin'
 
 const mgr: [string, string, any][] = [['/', 'Dashboard', Home], ['/prediction', 'Demand prediction', Gauge], ['/prep', 'Preparation', ChefHat], ['/waste', 'Waste analytics', Trash2], ['/menu', 'Menu management', Utensils],
-  ['/menu-opt', 'Menu optimisation', Sparkles], ['/vision', 'Image recognition', Camera], ['/surplus', 'Surplus & donations', HeartHandshake], ['/alerts', 'Smart alerts', Bell], ['/sustainability', 'Sustainability', Leaf], ['/users', 'Users', Users], ['/settings', 'Institution settings', Settings]]
+  ['/recommendations', 'What to cook next', ChefHat], ['/surplus', 'Surplus & donations', HeartHandshake], ['/alerts', 'Smart alerts', Bell], ['/users', 'Users', Users], ['/settings', 'Institution settings', Settings]]
 const NAV: Record<string, [string, string, any][]> = {
   student: [['/', 'Dashboard', Home], ['/book', 'Book meals', BookOpen], ['/history', 'Meal history', History]],
   mess_admin: mgr,
   super_admin: [...mgr, ['/admin', 'Platform admin', UserCog]],
-  kitchen: [['/', 'Dashboard', Home], ['/prep', 'Preparation', ChefHat], ['/prediction', 'Demand prediction', Gauge], ['/waste', 'Waste analytics', Trash2], ['/vision', 'Image recognition', Camera], ['/surplus', 'Surplus', HeartHandshake], ['/alerts', 'Smart alerts', Bell], ['/sustainability', 'Sustainability', Leaf]],
+  kitchen: [['/', 'Dashboard', Home], ['/prep', 'Preparation', ChefHat], ['/prediction', 'Demand prediction', Gauge], ['/waste', 'Waste analytics', Trash2], ['/surplus', 'Surplus', HeartHandshake], ['/alerts', 'Smart alerts', Bell]],
   ngo: [['/', 'Surplus & requests', HeartHandshake]],
 }
 
@@ -71,10 +71,10 @@ function Shell() {
               {role === 'student' && <><Route path="/book" element={<BookMeals />} /><Route path="/history" element={<MealHistory />} /></>}
               {role !== 'student' && role !== 'ngo' && <>
                 <Route path="/prediction" element={<Prediction />} /><Route path="/prep" element={<Preparation />} /><Route path="/waste" element={<WasteAnalytics />} />
-                <Route path="/vision" element={<Vision />} /><Route path="/surplus" element={<Surplus />} /><Route path="/alerts" element={<Alerts />} /><Route path="/sustainability" element={<Sustainability />} />
+                <Route path="/surplus" element={<Surplus />} /><Route path="/alerts" element={<Alerts />} />
               </>}
               {(role === 'mess_admin' || role === 'super_admin') && <>
-                <Route path="/menu" element={<MenuManagement />} /><Route path="/menu-opt" element={<MenuOptimisation />} /><Route path="/users" element={<UsersPage />} /><Route path="/settings" element={<InstitutionSettings />} />
+                <Route path="/menu" element={<MenuManagement />} /><Route path="/recommendations" element={<CookingAdvice />} /><Route path="/users" element={<UsersPage />} /><Route path="/settings" element={<InstitutionSettings />} />
               </>}
               {role === 'super_admin' && <Route path="/admin" element={<AdminPage />} />}
               <Route path="/profile" element={<Profile />} />
@@ -93,7 +93,7 @@ export default function App() {
   return (
     <Routes>
       {!user ? <>
-        <Route path="/" element={<Landing />} /><Route path="/login" element={<Login />} /><Route path="/register" element={<Register />} /><Route path="/forgot-password" element={<Forgot />} /><Route path="*" element={<Navigate to="/login" />} />
+        <Route path="/" element={<Landing />} /><Route path="/login" element={<Login />} /><Route path="/register" element={<Register />} /><Route path="/register-mess" element={<RegisterMess />} /><Route path="/forgot-password" element={<Forgot />} /><Route path="*" element={<Navigate to="/login" />} />
       </> : <Route path="/login" element={<Navigate to="/" />} />}
       {user && <Route path="/*" element={<Shell />} />}
     </Routes>

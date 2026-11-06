@@ -55,17 +55,17 @@ def run(n_students=200, days_back=60, reset=True, seed=42, train_model=True, qui
     inst = Institution(name="Demo University Mess (SYNTHETIC DEMO DATA)", code="DEMO", data_mode="demo", settings={"currency": "INR"}); db.add(inst); db.flush()
     pw = hash_password(settings.seed_demo_password)
     mk = lambda email, name, role, **k: (db.add(User(email=email, name=name, role=role, password_hash=pw, **k)), db.flush())
-    sa = User(email="superadmin@platesense.demo", name="Platform Admin", role="super_admin", password_hash=pw, institution_id=inst.id)
-    mg = User(email="manager@platesense.demo", name="Mess Manager", role="mess_admin", password_hash=pw, institution_id=inst.id)
-    kt = User(email="kitchen@platesense.demo", name="Kitchen Lead", role="kitchen", password_hash=pw, institution_id=inst.id)
-    n1 = User(email="ngo@platesense.demo", name="Asha Volunteer", role="ngo", password_hash=pw, is_approved=True)
-    n2 = User(email="ngo.pending@platesense.demo", name="New Partner", role="ngo", password_hash=pw, is_approved=False)
+    sa = User(email="superadmin@shakambari.demo", name="Platform Admin", role="super_admin", password_hash=pw, institution_id=inst.id)
+    mg = User(email="manager@shakambari.demo", name="Mess Manager", role="mess_admin", password_hash=pw, institution_id=inst.id)
+    kt = User(email="kitchen@shakambari.demo", name="Kitchen Lead", role="kitchen", password_hash=pw, institution_id=inst.id)
+    n1 = User(email="ngo@shakambari.demo", name="Asha Volunteer", role="ngo", password_hash=pw, is_approved=True)
+    n2 = User(email="ngo.pending@shakambari.demo", name="New Partner", role="ngo", password_hash=pw, is_approved=False)
     db.add_all([sa, mg, kt, n1, n2]); db.flush()
     db.add_all([NGOPartner(user_id=n1.id, org_name="Annapurna Food Bank (demo)", registration_no="DEMO-0001", address="Demo address", verified=True, verified_by=mg.id, verified_at=local_now()),
                 NGOPartner(user_id=n2.id, org_name="Hope Kitchen (demo, pending)", registration_no="DEMO-0002", verified=False)])
     students = []
     for i in range(n_students):
-        students.append(User(email=f"student{i + 1:03d}@students.platesense.demo", name=f"{rnd.choice(FIRST)} {rnd.choice(LAST)}", role="student", password_hash=pw, institution_id=inst.id))
+        students.append(User(email=f"student{i + 1:03d}@students.shakambari.demo", name=f"{rnd.choice(FIRST)} {rnd.choice(LAST)}", role="student", password_hash=pw, institution_id=inst.id))
     db.add_all(students); db.flush()
     db.add_all([StudentProfile(user_id=s.id, diet=rnd.choices(["veg", "vegan"], [.9, .1])[0], hostel=f"Block {rnd.choice('ABCD')}") for s in students])
     items = {}
@@ -162,7 +162,7 @@ def run(n_students=200, days_back=60, reset=True, seed=42, train_model=True, qui
     if not quiet:
         print(f"Seeded SYNTHETIC demo data: {n_students} students, {len(sched_rows)} meal schedules, {len(bk)} bookings, {len(at)} attendance rows.")
         print(f"Demo password for all seeded accounts: {settings.seed_demo_password}")
-        print("Logins: superadmin@ / manager@ / kitchen@ / ngo@ / student001@  (domain: platesense.demo or students.platesense.demo)")
+        print("Logins: superadmin@ / manager@ / kitchen@ / ngo@ / student001@  (domain: shakambari.demo or students.shakambari.demo)")
     db.close()
 
 
